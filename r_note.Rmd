@@ -1,0 +1,175 @@
+# R_note
+
+## 1.1 command
+
+```{r}
+# setwd("C:/Documents") change our directory to the documents folder on the C drive
+```
+
+```{r}
+install.packages(c("sf", "tmap", "tmaptools", "RSQLite", "tidyverse"), 
+                 repos = "https://www.stats.bris.ac.uk/R/")
+```
+
+## 1.2 numeric
+
+```{r}
+#编辑数据时注意在形式上区分浮点和整型
+  a_integer <- 1
+  a_double <- 0.1
+
+  is.integer(a_integer)  #function(augument)
+  #FALSE r默认所有输出都是double
+  is.integer(a_double)
+  #TRUE
+  a_integer <- as.integer(a_integer)  # as.  Force an Object to Belong to a Class
+  is.integer(a_integer)
+  #TRUE
+```
+
+## 1.3 character
+
+```{r}
+a_character <- "Hello world"
+  a_num_character <- "123"
+
+  is.character(a_character)
+  #TRUE
+  is.numeric(a_num_character)
+  #FALSE
+  a_num_character <- as.numeric(a_num_character)
+  is.numeric(a_num_character)
+  #TRUE
+
+  a_paste1 <- paste("Hello world","123",sep = "_") #Concatenate Strings
+  #"Hello world_123"
+  a_paste2 <- paste0(a_character,"_",a_num_character)
+
+  b_substr1 <- substr(a_character,start=2,stop=5)
+```
+
+## 1.4 logical
+
+```{r}
+as.logical()
+```
+
+## 1.5 Data Type
+
+```{r}
+#vector, matrix, dataframe(table), array, list
+```
+
+## 2.1 vector
+
+```{r}
+  b_numeric_vector_1 <- c(1,2,3)
+  b_numeric_vector_2 <- c(1,2:3)
+  #vector 取值[]
+  b_numeric_vector_1[c(2,3)]
+  #vector 替换
+  b_numeric_vector_3 <- b_numeric_vector_1[c(2,3)] <- c(6,6)
+```
+
+## 2.2 matrix
+
+```{r}
+  matrix_1 <- matrix(c(1:50),nrow = 5) #先列后行
+  matrix_2 <- matrix(c(1:50),nrow = 5,byrow = TRUE) #先行后列 
+  
+  median(matrix_1)
+  
+  apply(matrix_1,1,sum)
+  #1 indicates rows, 2 indicates columns, c(1, 2) indicates rows and columns
+```
+
+## 2.3 dataframe
+
+```{r}
+name1 <- c("bob","tom","sam")
+score1 <- c(80,90,100)
+class1 <- c(1,3,2)
+student_score <- data.frame(name=name1,
+                            score=score1,
+                            class=class1)
+#dataframe取值
+rownames(student_score) <- student_score[,1]
+student_score_name <- student_score$
+```
+### 2.3.1 tibble
+```{r}
+#data type for every column
+#更适合在tidyverse中使用
+library(tibble)
+
+tibble(
+    name = c('张三', '李四', '王五', '赵六'),
+    age = 12:15,
+    score = c(98.5, 72, 88, 96)
+)
+```
+
+```{r}
+library(tidyverse)
+df %>% 
+  head()
+df %>% 
+  tail()
+```
+### 2.3.2 elements of dataframe
+```{r}
+#data.frame[row,column]
+df <- iris
+df[1:10, 1]
+df[5:15,]
+df[c(2,3,6),2]
+df[,1]
+```
+
+
+## packages
+dplyr
+```{r}
+library(dplyr)
+## a grammar of data manipulation, it has multiple verbs that allow you to change your data into a suitable format
+
+#rename
+df <- df %>% 
+  dplyr::rename(column = Data1, column2=Data2)
+#select
+df %>% 
+  dplyr::select(column1)
+  #not all spatial data is compatible with dplyr yet, such as raster data
+  df$column1
+  df[["column1"]]
+
+```
+
+
+##syntax
+```{r}
+# ::
+## use a function my_function from a package called my_package
+my_package::my_function()
+
+```
+
+
+## 3.1 read data
+
+```{r}
+
+```
+
+
+- Select points or polygons in a polygon = Selecting data by location = spatial sub-setting
+
+- Determine where datasets overlap (or touch, or don’t overlap) and extract those parts = spatial clipping
+
+- Join two spatial datasets together = spatial joining, which can use spatial subsetting functions as the default is st_intersects(). This function joins spatial data.
+
+- Selecting data by attributes = filtering or selecting rows / columns with dplyr
+
+
+
+

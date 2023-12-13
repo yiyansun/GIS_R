@@ -1,0 +1,31 @@
+---
+title: "exam_note"
+author: "yiyan Sun"
+date: "2023-12-08"
+output: html_document
+---
+##
+
+
+## read data
+```{r}
+Data <- read_csv("",locale = locale(encoding = "latin1"),na = "n/a")
+```
+### examine new data
+```{r}
+class(Data)
+Datatypelist <- Data %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+summary(df)
+```
+## export
+
+Finally write shape to a new GeoPackage(.gpkg) prevent overwriting by setting *delete_layer=TRUE*
+```{r}
+shape %>%
+  st_write(.,"directory",      "shape_name",delete_layer=TRUE)
+```
