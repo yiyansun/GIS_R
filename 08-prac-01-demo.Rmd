@@ -1,0 +1,259 @@
+---
+title: "08-prac-01-demo"
+author: "yiyan Sun"
+date: "2023-11-29"
+output: html_document
+---
+# Learning Objectives
+1. Explain hypothesis testing
+2. Execute regression in R
+3. Describe the assumptions associated with regression models
+4. Explain steps to deal with spatially autocorrelated (spatial similarity of nearby observations) residuals.
+
+# Task:
+  explore the factors that might affect the average exam scores of 16 year-old across London. 
+  GSCEs are the exams taken at the end of secondary education and here have been aggregated for all pupils at their home addresses across the City for Ward geographies.
+
+# library packages
+
+```{r}
+library(tidyverse)
+library(sf)
+library(tmap)
+library(tmaptools)
+library(geojsonio)
+library(plotly)
+library(rgdal)
+library(broom)
+library(mapview)
+library(crosstalk)
+library(leaflet)
+library(spdep)
+library(car)
+library(fs)
+library(janitor)
+library(tidypredict)
+library(tidymodels)
+library(RColorBrewer)
+library(ggplot2)
+
+library(corrr)
+library(performance)
+
+library(spatialreg)
+library(lmtest)
+```
+
+# load data
+
+```{r}
+# download a zip file containing some boundaries we want to use
+download.file("https://data.london.gov.uk/download/statistical-gis-boundary-files-london/9ba8c833-6370-4b11-abdc-314aa020d5e0/statistical-gis-boundaries-london.zip", destfile="wk8/data/statistical-gis-boundaries-london.zip")
+```
+
+Get the zip file and extract it
+
+```{r}
+listfiles<-dir_info(here::here("wk8","data")) %>%
+  dplyr::filter(str_detect(path, ".zip")) %>%
+  dplyr::select(path)%>%
+  pull()%>%
+  #print out the .gz file
+  print()%>%
+  as.character()%>%
+  utils::unzip(exdir=here::here("wk8","data"))
+```
+
+Look inside the zip and read in the .shp
+
+```{r}
+#look what is inside the zip
+
+Londonwards<-fs::dir_info(here::here("wk8","data","statistical-gis-boundaries-london","ESRI"))%>%
+  #$ means exact match
+  dplyr::filter(str_detect(path,"London_Ward_CityMerged.shp$"))%>%
+  dplyr::select(path)%>%
+  dplyr::pull()%>%
+  #read in the file in
+  sf::st_read()
+```
+
+read attribute data
+```{r}
+# LondonWardProfiles from London Data Store "https://data.london.gov.uk/download/ward-profiles-and-atlas/772d2d64-e8c6-46cb-86f9-e52b4c7851bc/ward-profiles-excel-version.csv"
+LondonWardProfiles <- read_csv("wk8/data/ward-profiles-excel-version.csv",
+                               na = c("", "NA", "n/a"), 
+                               locale = locale(encoding = 'Latin1'), 
+                               col_names = TRUE)
+# readr - to do with text values being stored in columns containing numeric values
+
+#read in some data - couple of things here. Read in specifying a load of likely 'n/a' values, also specify Latin1 as encoding as there is a pound sign (£) in one of the column headers
+```
+
+```{r}
+# check all the columns read in correctly
+Datatypelist <- LondonWardProfiles %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+```
+
+# data merge
+
+```{r}
+#merge boundaries and data
+LondonWardProfiles <- Londonwards %>% 
+  left_join(.,LondonWardProfiles,
+            by=c("GSS_CODE"="New code"))
+```
+
+plot LondonWardProfiles
+
+```{r}
+tmap_mode("plot")
+qtm(LondonWardProfiles, 
+    fill = "Average GCSE capped point scores - 2014", 
+    borders = "gray",  
+    fill.palette = "Blues")
+```
+
+# additional data- london schools
+
+```{r}
+# add some contextual data (school data)
+
+# where the secondary schools are in London
+london_schools <- read_csv("wk8/data/all_schools_xy_2016.csv")
+
+#from the coordinate values stored in the x and y columns, which look like they are latitude and longitude values, create a new points dataset
+london_schools_sf <- st_as_sf(london_schools, 
+                           coords = c("x","y"), 
+                           crs = 4326)
+
+london_sec_schools_sf <- london_schools_sf %>%
+  filter(PHASE=="Secondary")
+
+tmap_mode("plot")
+qtm(london_sec_schools_sf)
+```
+
+# Analysing GCSE exam performance - testing a research hypothesis
+
+explore the factors that might influence GCSE exam performance in London
+
+-regression model: 
+  a linear relationship between our outcome variable (Average GCSE score in each Ward in London) and another variable or several variables that might explain this outcome
+
+## 1. Research Question and Hypothesis
+
+What are the factors that might lead to variation in Average GCSE point scores across the city?
+
+  Null hypothesis: there is no relationship between the Average GCSE point scores and the other variables
+
+## 2. Regression basics
+
+x - predictor or independent variable
+y - dependent variable
+
+```{r}
+q <- qplot(x = `Unauthorised Absence in All Schools (%) - 2013`, 
+           y = `Average GCSE capped point scores - 2014`, 
+           data=LondonWardProfiles)
+```
+
+```{r}
+# plot with a regression line 
+# added some jitter here as the x-scale is rounded, jitter is a random value added to the x-axis to avoid overplotting
+q + stat_smooth(method="lm", se=FALSE, size=1) + geom_jitter(width=0.1)
+```
+
+## 3. Running a Regression Model in R
+
+```{r}
+#run the linear regression model and store its outputs in an object called model1
+Regressiondata<- LondonWardProfiles%>%
+  clean_names()%>%
+  dplyr::select(average_gcse_capped_point_scores_2014, 
+                unauthorised_absence_in_all_schools_percent_2013)
+
+#now model
+model1 <- Regressiondata %>%
+  lm(average_gcse_capped_point_scores_2014 ~
+               unauthorised_absence_in_all_schools_percent_2013,
+     data=.)
+```
+
+```{r}
+summary(model1)
+```
+### 3.1 Interpreting and using the model outputs 
+
+
+### 3.2 broom
+
+```{r}
+tidy(model1)
+```
+
+```{r}
+glance(model1)
+```
+```{r}
+Regressiondata %>%
+  tidypredict_to_column(model1)
+```
+
+## 4. tidymodels
+
+
+## 5. Bootstrap resampling
+
+
+## 6. Variables
+
+
+
+## 7. Assumptions Underpinning Linear Regression
+
+### 7.1 Assumption 1 - There is a linear relationship between the dependent and independent variables
+
+
+#### 7.1.1 Transforming variables
+
+
+#### 7.1.2 Should I transform my variables?
+
+
+### 7.2 Assumption 2 - The residuals in your model should be normally distributed
+
+
+### 7.3 Assumption 3 - No Multicolinearity in the independent variables
+
+
+#### 7.3.1 Variance Inflation Factor (VIF)
+
+
+### 7.4 Assumption 4 - Homoscedasticity
+
+
+
+
+### 7.5 Assumption 5 - Independence of Errors
+
+
+#### 7.5.1 Standard Autocorrelation
+
+
+
+## 8. Spatial Regression Models
+
+### 8.1 Dealing with Spatially Autocorrelated Residuals - Spatial Lag and Spatial Error models
+
+#### 8.1.1 The Spatial Lag (lagged dependent variable) model
+
+
+
+##### 8.1.1.1 Queen’s case lag

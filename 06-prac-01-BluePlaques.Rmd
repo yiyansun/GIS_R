@@ -1,0 +1,85 @@
+---
+title: "BluePlaques"
+author: "yiyan Sun"
+date: "2023-11-17"
+output: html_document
+---
+# packages
+```{r}
+library(spatstat) #spatstat is a package for analyzing spatial point pattern data
+library(here)
+library(sp)
+library(tmap)
+library(sf)
+library(tidyverse)
+library(stringr)
+library(geojson)
+library(geojsonio)
+library(tmaptools)
+library(rgeos)
+library(maptools)
+```
+
+# read data
+```{r}
+LondonBorough <- st_read("wk1/london_borough/data/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")%>% 
+  st_transform(., crs = 27700)
+
+# get the location of all Blue Plaques in the City
+BluePlaques <- st_read("https://s3.eu-west-2.amazonaws.com/openplaques/open-plaques-london-2018-04-08.geojson") %>% 
+  st_transform(., crs = 27700)
+
+BoroughMap <- LondonBorough %>% 
+  dplyr::filter(str_detect(GSS_CODE, "E09")) %>% 
+  st_transform(., crs = 27700)
+```
+
+# extract the borough
+```{r}
+# select by attribute
+Harrow <- BoroughMap %>% 
+  dplyr::filter(., NAME=="Harrow") %>% 
+  st_transform(., crs = 27700)
+
+# check the shape of harrow borough
+tm_shape(Harrow)+
+  tm_polygons(col=NA, alpha = 0.5)
+```
+
+clip the data to single borough
+```{r}
+BluePlaquesSub <- BluePlaques[Harrow,]
+
+tmap_mode("plot")
+tm_shape(Harrow)+
+  tm_polygons(col=NA, alpha = 0.5)+
+  tm_shape(BluePlaquesSub)+
+  tm_dots(col="red", size = 0.1)
+
+```
+
+set a window at the borough boundary
+
+```{r}
+window <- as.owin(Harrow)
+plot(window)
+```
+
+spatstat <- point pattern(ppp) object
+
+```{r}
+# create a sp object
+BluePlaquesSub <- as(BluePlaquesSub, "Spatial")
+
+# create a ppp object
+BluePlaquesSub.ppp <- ppp(x=BluePlaquesSub@coords[,1],
+                          y=BluePlaquesSub@coords[,2],
+                          window=window)
+```
+
+```{r}
+Bl
+```
+
+
+

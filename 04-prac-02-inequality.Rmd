@@ -1,0 +1,63 @@
+# Gender Inequality Index TASK - Week 4
+
+  Read in global gender inequality data
+  Join the global gender inequality index to spatial data of the World, creating a new column of difference in inequality between 2010 and 2019
+  Share it with the World on GitHub
+  
+  Tip the countrycode R package will be helpful
+  https://github.com/vincentarelbundock/countrycode
+
+  Tip the gender inequality has changed in the last year, you will find what you need in the “All composite indices and components time series (1990-2021)” dataset, the metadata file beneath it will explain what the columns are.
+  
+## packages
+```{r}
+library(sf)
+library(janitor)
+library(tidyverse)
+library(terra)
+library(ggplot2)
+library(remotes)
+```
+
+## countrycode package
+```{r}
+# install.packages("countrycode")
+
+# install_github('vincentarelbundock/countrycode')
+```
+
+## read data
+
+* HDI data from: https://hdr.undp.org/data-center/documentation-and-downloads
+* Shapefile from: https://hub.arcgis.com/datasets/2b93b06dc0dc4e809d3c8db5cb96ba69_0/explore?location=-2.688200%2C0.000000%2C1.41 
+```{r}
+HDR <- read_csv("wk4/data/HDR21-22_Statistical_Annex_GII_Table.csv",
+                locale = locale(encoding = "latin1"),
+                na = " ", skip=0)
+
+World <- st_read("wk4/data/World_Countries_Generalized/World_Countries_Generalized.shp")
+```
+
+## Column names
+
+Select columns we want and change country name to country code, using the `countrycode` package
+
+We could also just join it without this on the country name column 
+
+Some notes:
+
+* COW codes = correlates of war codes
+* ISO = International Organization for Standardization with 2 or 3 letters...
+
+```{r}
+HDIcols<- HDI %>%
+  clean_names()%>%
+  select(iso3, country, gii_2019, gii_2010)%>%
+  mutate(difference=gii_2019-gii_2010)%>%
+  #not needed here as we can now use the country name...but see below
+  mutate(iso_code=countrycode(country, origin = 'country.name', destination = 'iso2c'))%>%
+  mutate(iso_code2=countrycode(iso3, origin ='iso3c', destination = 'iso2c'))
+
+  
+```
+

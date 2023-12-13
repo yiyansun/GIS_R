@@ -1,0 +1,19 @@
+
+# Using RStudio with Git
+ 
+```{r}
+install.packages("usethis")
+library(usethis)
+```
+## Configure your Git
+```{r}
+# in the console
+## edit_git_config()
+```
+## Git commands
+```{r}
+# git add .         to stage all files
+# git commit -m    "commit comment" to commit all the staged files
+# git push         to push the commited files to the remote
+```
+

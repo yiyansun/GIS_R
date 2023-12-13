@@ -1,0 +1,38 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-11-01"
+---
+# Airbnb London - WEEK 5 demo
+## packages
+```{r}
+library(sf)
+library(janitor)
+library(dplyr)
+library(tidyverse)
+library(terra)
+library(ggplot2)
+library(tmap)
+library(tmaptools)
+library(stringr)
+```
+
+## read data
+```{r}
+Londonborough <- st_read("wk1/london_borough/data/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp") %>% st_transform(.,27700)
+
+OSM <- st_read("wk5/data/greater-london-latest-free.shp/gis_osm_pois_free_1.shp") %>% 
+  st_transform(.,27700) %>% 
+  # select hotel only
+  dplyr::filter(fclass == 'hotel')
+```
+
+## st_join
+```{r}
+
+```
+
+
+
+
+

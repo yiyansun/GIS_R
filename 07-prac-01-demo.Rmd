@@ -1,0 +1,54 @@
+---
+title: "07-prac-01-demo"
+author: "yiyan Sun"
+date: "2023-11-22"
+output: html_document
+---
+# TASK WEEK 7
+Are the values (in this case the density of blue plaques) similar (or dissimilar) across the wards of London
+
+```{r}
+library(janitor)
+library(sf)
+library(tidyverse)
+```
+
+# read data
+1. London Ward Data: 
+  from the London Data store          https://data.london.gov.uk/dataset/statistical-gis-boundary-files-london
+  
+2. London Wards Merged data: 
+  from the London Data store          
+  
+```{r}
+LondonWards <- st_read("wk7/data/statistical-gis-boundaries-london/ESRI/London_Ward.shp")%>% 
+  st_transform(.,27700)
+
+LondonWardsMerged <- st_read("wk7/data/statistical-gis-boundaries-london/ESRI/London_Ward_CityMerged.shp") %>% 
+  st_transform(.,27700)
+```
+
+3. Ward data
+
+```{r}
+WardData <- read_csv("wk7/data/ward-profiles-excel-version.csv",locale=locale(encoding="latin1"),na=c("NA","n/a")) %>% 
+  clean_names()
+
+```
+
+# merge data
+
+```{r}
+LondonWardsMerged <- LondonWardsMerged %>% 
+  left_join(WardData, 
+            by = c("GSS_CODE" = "new_code"))%>%
+  dplyr::distinct(GSS_CODE, .keep_all = T)%>%
+  dplyr::select(GSS_CODE, ward_name, average_gcse_capped_point_scores_2014)
+
+# keep_all = T to keep all columns
+```
+
+```{r}
+
+```
+

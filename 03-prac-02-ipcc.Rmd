@@ -1,0 +1,103 @@
+# TASK
+  manipulate some raster data and produce some descriptive statistics. 
+  
+  Climatic models fed into the latest Intergovernmental Panel on Climate Change (IPCC), the models are divided into Shared Socioeconomic Pathways known as SSPs, ranging from SSP1 (lots of mitigation and adaption) to SSP5 (fossil fuel development). The Carbon Brief explainer has more information on the scenarios.
+
+  For any country in the World produce descriptive statistics that show the difference in maximum annual temperature for key cities between SSP1 and SSP5 for the years 2081-2100, using any model and resolution.
+
+# packages
+```{r}
+library(sf)
+library(sp)
+library(here)
+library(janitor)
+library(tidyverse)
+library(terra)
+library(ggplot2)
+library(raster)
+```
+
+# read data
+
+```{r}
+world_cities <- sf::st_read("wk3/data_IPCC/World_Cities/World_Cities.shp")
+
+uk <- sf::st_read("wk3/data_IPCC/gadm41_GBR.gpkg",layer="ADM_ADM_0")
+layer <- sf::st_layers("wk3/data_IPCC/gadm41_GBR.gpkg")
+
+ssp1 <- terra::rast("wk3/data_IPCC/wc2.1_2.5m_tmax_ACCESS-CM2_ssp126_2081-2100.tif")
+ssp5 <- terra::rast("wk3/data_IPCC/wc2.1_2.5m_tmax_ACCESS-CM2_ssp585_2081-2100.tif")
+```
+
+# filter uk cities
+```{r}
+uk_cities <- world_cities %>% 
+  janitor::clean_names(.) %>%
+  dplyr::filter(.,cntry_name == "United Kingdom")
+```
+
+# substract the difference
+```{r}
+diff_climate_model <- ssp5-ssp1
+```
+
+# crop and mask
+```{r}
+uk_crop <- diff_climate_model %>% 
+  terra::crop(.,uk)
+
+uk_diff_climate_model <- uk_crop %>% 
+  terra::mask(.,uk)
+```
+
+# reprojection
+```{r}
+# Load raster file
+
+newproj<-"ESRI:54009"
+# get the jan raster and give it the new proj4
+pr1 <- uk_diff_climate_model %>%
+  terra::project(., newproj)
+plot(pr1)
+
+uk_diff_climate_model_raster <- raster(uk_diff_climate_model)
+
+# Transform the raster to a different coordinate system (e.g., EPSG 27700)
+uk_project <- projectRaster(uk_diff_climate_model_raster, crs = "+proj=utm +zone=30 +datum=WGS84 +units=m +no_defs")
+
+
+## Define the target CRS (EPSG:27700)
+ target_crs <- CRS("+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +datum=OSGB36 +units=m +no_defs")
+## Reproject the raster to EPSG:27700
+uk_diff_climate_model_transformed <- projectRaster(uk_diff_climate_model, crs = target_crs)
+```
+
+# rename and extract data from points
+```{r}
+month <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+names(uk_cities) <- month
+
+
+uk_city_diff<- terra::extract(uk_diff_climate_model, uk_cities)
+```
+
+```{r}
+uk_cities_sf <- st_as_sf(uk_cities, coords = c("lon", "lat"), crs = 4326)  # Specify the coordinate reference system (CRS)
+
+# Rename the columns with month names if necessary
+#st_set_names(uk_cities_sf, month)
+uk_city_diff <- terra::extract(uk_diff_climate_model, uk_cities_sf)
+```
+
+
+# make a join ID column in the original point sf and use that to join
+```{r}
+uk_cities_join_ID <- uk_cities %>%
+  dplyr::mutate(join_id= 1:n())
+```
+
+
+
+

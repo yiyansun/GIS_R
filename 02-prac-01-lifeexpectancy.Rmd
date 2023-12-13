@@ -1,0 +1,359 @@
+WEEK2
+map difference in life expentancy in London
+
+1.Execute basic processing in R
+2.Examine, clean and manipulate comma seperate value (.csv) data
+3.Examine, clean and manipulate and plot spatial (.shp) data
+4.Produce interactive maps
+5.Evaluate the benefits of different data manipulation and mapping techniques
+
+DATA
+LondonData <- read_csv("https://data.london.gov.uk/download/ward-profiles-and-atlas/772d2d64-e8c6-46cb-86f9-e52b4c7851bc/ward-profiles-excel-version.csv")
+
+## packages
+
+```{r}
+library(here)
+library(dplyr)
+library(tidyverse)
+library(sf)
+library(sp)
+library(janitor)
+library(maptools)
+library(RColorBrewer)
+library(classInt)
+library(sp)
+library(rgeos)
+library(tmap)
+library(tmaptools)
+library(rgdal)
+library(geojsonio)
+library(plotly)
+
+# rm(list = ls())
+```
+
+## read data
+
+```{r}
+#row_to_delete <- LondonData[]
+LondonData <- read.csv("wk2/data/LondonData.csv",
+                          header = TRUE,
+                          sep=",",
+                          encoding = "latin1")
+# header = TRUE   the first row of the CSV file contains column names (headers). When set to TRUE, it tells R to treat the first row as column names
+#encoding = "latin1"   specifies the character encoding of the file
+
+#here::here()
+##LondonDataOSK<- read.csv(here::here("wk2","data","LondonData.csv"))
+```
+
+## examing new data
+
+```{r}
+# check what data type your new data set
+class(LondonData)
+# another two functions summarise_all() (from dplyr) and pivot_longer() (from tidyr) to check that our data has been read in correctly
+Datatypelist <- LondonData %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+Datatypelist
+```
+
+## edit data
+
+```{r}
+LondonData <- edit(LondonData)
+```
+
+## summarize data
+
+```{r}
+summary(LondonData)
+LondonData%>%
+  colnames()%>%
+  # just look at the head, top5
+  head()
+```
+
+## manipulate data
+
+```{r}
+# 1. select rows
+    #[]
+  ##LondonBoroughs <- LondonData[626:658,]
+    #dplyr--slice()
+  LondonBoroughs <- LondonData %>% 
+    slice(626:658)
+
+# 2. filter
+  Femalelifeexp<- LondonData %>%  
+   dplyr:::filter.data.frame(.,`Female.life.expectancy..2009.13`>90) 
+    #use backticks`` when column names contain spaces or special characters
+    ## cannot use in character format
+
+ ##  str_detect
+  LondonBoroughs <- LondonData %>% 
+    filter(str_detect(`New.code`, "^E09"))
+    # ^E09 "New code" starts with "E09"
+```
+
+```{r}
+# 3. select field
+  LondonBoroughs$Ward.name
+  ##  $
+  # same as
+  LondonBoroughs %>% 
+    dplyr::select(`Ward.name`) %>% 
+    print()
+  
+  # two rows at the top for the City of London, it features twice in the data set
+  # extract only unique rows
+  LondonBoroughs <- LondonBoroughs %>% 
+    distinct()
+  
+# 4. select columns
+  LondonBoroughs_manualcols <- LondonBoroughs[,c(1,19,20,21)]
+  
+  LondonBoroughs_dplyrcols <- LondonBoroughs %>% 
+    dplyr::select(c(1,19,20,21))
+  
+  ## select columns with certain words
+  LondonBoroughs_contains <- LondonBoroughs %>% 
+    dplyr::select(contains("expectancy",
+                           contains("Ward.name")))
+```
+
+```{r}
+# 5 rename columns
+LondonBoroughs <- LondonBoroughs %>%
+  dplyr::rename(borough=`Ward.name`) %>% 
+  clean_names
+  ## By defualt Janitor removes all capitals and uses an underscore wherever there is a space
+
+#janitor::clean_names
+  #LondonBoroughs <- LondonBoroughs %>% janitor::clean_names(., case="big_camel")
+  ## case="big_camel" = "column_name_example" might become "ColumnNameExample"
+```
+
+```{r}
+# 6. dplyr::mutate()
+  # add new variables based on existing ones
+
+## a.the average of male and female life expectancy together
+## b.a normalised value for each London borough based on the London average.
+
+
+is.numeric(Femalelifeexp) # false
+
+Life_expectancy <- LondonBoroughs %>% 
+  #new column with average of male and female life expectancy
+  mutate(averagelifeexpectancy=(female_life_expectancy_2009_13+male_life_expectancy_2009_13)/2) %>% 
+  #new column with normalised life expectancy
+  mutate(normaliselifeexpectancy=averagelifeexpectancy/mean(averagelifeexpectancy)) %>% 
+  #select only columns we want
+  dplyr::select(new_code,
+                borough,
+                averagelifeexpectancy,
+                normaliselifeexpectancy) %>% 
+  #arrange in descending order
+  #ascending is the default and would be
+  #arrange(normalisedlifeepectancy)
+  arrange(desc(normaliselifeexpectancy))
+
+# show the top and bottom number of rows
+slice_head(Life_expectancy,n=5)
+slice_tail(Life_expectancy,n=5)
+```
+
+```{r}
+# 7. dplyr::case_when()
+Life_expectancy2 <- Life_expectancy %>%
+  mutate(UKcompare=case_when(averagelifeexpectancy>81.16~"above UK average",TRUE~"below UK average"))
+
+```
+
+```{r}
+# 8. group_by
+Life_expectancy2_group <- Life_expectancy2 %>%
+  mutate(UKdiff = averagelifeexpectancy-81.16) %>%
+  group_by(UKcompare)%>%
+  summarise(range=max(UKdiff)-min(UKdiff), count=n(), Average=mean(UKdiff))
+
+```
+
+have more information based on the distribution of the Boroughs compared to the national average, as opposed to just over or under
+
+1.Round the column UKdiff to 0 decimal places (not adding a new column)
+2.Use case_when() to find Boroughs that have an average age of equal to or over 81 and create a new column that contains text based combining equal or above UK average by then the years created in UKdiff. We do this through the str_c() function from the stringr package that let’s us join two or more vector elements into a single character vector. Here sep determines how these two vectors are separated.
+3.Then group by the UKcompare column
+4.Finally, count the number in each group.
+
+```{r}
+Life_expectancy3 <- Life_expectancy %>%
+  mutate(UKdiff = averagelifeexpectancy-81.16)%>%
+  mutate(across(where(is.numeric), round, 3))%>%
+  mutate(across(UKdiff, round, 0))%>%
+  mutate(UKcompare = case_when(averagelifeexpectancy >= 81 ~ 
+                                 str_c("equal or above UK average by",
+                                       UKdiff, 
+                                       "years", 
+                                       sep=" "), 
+                               TRUE ~ str_c("below UK average by",
+                                            UKdiff,
+                                            "years",
+                                            sep=" ")))%>%
+  group_by(UKcompare)%>%
+  summarise(count=n())
+```
+
+```{r}
+Life_expectancy4 <- Life_expectancy %>%
+  mutate(UKdiff = averagelifeexpectancy-81.16)%>%
+  mutate(across(is.numeric, round, 3))%>%
+  mutate(across(UKdiff, round, 0))
+```
+
+## plot
+
+```{r}
+plot(LondonBoroughs$male_life_expectancy_2009_13,
+     LondonBoroughs$percent_children_in_reception_year_who_are_obese_2011_12_to_2013_14)
+```
+
+```{r}
+plot_ly(LondonBoroughs, 
+        #data for x axis
+        x = ~male_life_expectancy_2009_13, 
+        #data for y axis
+        y = ~x_children_in_reception_year_who_are_obese_2011_12_to_2013_14, 
+        #attribute to display when hovering 
+        text = ~borough, 
+        type = "scatter", 
+        mode = "markers")
+```
+
+
+```{r}
+EW <- st_read("wk7/data/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp")
+```
+
+```{r}
+LondonMap<- EW %>%
+  filter(str_detect(GSS_CODE, "^E09"))
+
+#plot it using the qtm function
+qtm(LondonMap)
+```
+
+```{r}
+LondonData <- clean_names(LondonData)
+
+#EW is the data we read in straight from the web
+BoroughDataMap <- EW %>%
+  clean_names()%>%
+  # the . here just means use the data already loaded
+  filter(str_detect(gss_code, "^E09"))%>%
+  merge(.,
+        LondonData, 
+        by.x="gss_code", 
+        by.y="new_code",
+        no.dups = TRUE)%>%
+  distinct(.,gss_code,
+           .keep_all = TRUE)
+```
+
+```{r}
+BoroughDataMap2 <- EW %>% 
+  clean_names() %>%
+  filter(str_detect(gss_code, "^E09"))%>%
+  left_join(., 
+            LondonData,
+            by = c("gss_code" = "new_code"))
+```
+
+```{r}
+tmap_mode("plot")
+qtm(BoroughDataMap, 
+    fill = "rate_of_job_seekers_allowance_jsa_claimants_2015")
+```
+
+extract it from OpenStreetMap (OSM) using the read_osm() function from the tmaptools package
+
+create a box (termed bounding box) around London using the st_box() function from the sf package to extract the basemap image (which is a raster)
+
+```{r}
+tmaplondon <- BoroughDataMap %>%
+  st_bbox(.) %>% 
+  tmaptools::read_osm(., type = "osm", zoom = NULL)
+```
+
+```{r}
+tmap_mode("plot")
+
+tm_shape(tmaplondon)+
+tm_rgb()+
+tm_shape(BoroughDataMap) + 
+tm_polygons("rate_of_job_seekers_allowance_jsa_claimants_2015", 
+        style="jenks",
+        palette="YlOrBr",
+        midpoint=NA,
+        title="Rate per 1,000 people",
+        alpha = 0.5) + 
+  tm_compass(position = c("left", "bottom"),type = "arrow") + 
+  tm_scale_bar(position = c("left", "bottom")) +
+  tm_layout(title = "Job seekers' Allowance Claimants", legend.position = c("right", "bottom"))
+```
+
+
+```{r}
+Life_expectancy4map <- EW %>%
+    inner_join(., 
+            Life_expectancy4,
+            by = c("GSS_CODE" = "new_code"))%>%
+    distinct(.,GSS_CODE, 
+           .keep_all = TRUE)
+```
+
+```{r}
+tmap_mode("plot")
+
+tm_shape(tmaplondon)+
+tm_rgb()+
+tm_shape(Life_expectancy4map) + 
+tm_polygons("UKdiff", 
+        style="pretty",
+        palette="Blues",
+        midpoint=NA,
+        title="Number of years",
+        alpha = 0.5) + 
+  tm_compass(position = c("left", "bottom"),type = "arrow") + 
+  tm_scale_bar(position = c("left", "bottom")) +
+  tm_layout(title = "Difference in life expectancy", legend.position = c("right", "bottom"))
+```
+
+
+Force the columns to the appropriate data types (e.g. text, numeric)
+```{r}
+flytipping <- read_csv("https://data.london.gov.uk/download/fly-tipping-incidents/536278ff-a391-4f20-bc79-9e705c9b3ec0/fly-tipping-borough.csv")
+
+flytipping1 <- read_csv("https://data.london.gov.uk/download/fly-tipping-incidents/536278ff-a391-4f20-bc79-9e705c9b3ec0/fly-tipping-borough.csv", 
+                       col_types = cols(
+                         code = col_character(),
+                         area = col_character(),
+                         year = col_character(),
+                         total_incidents = col_number(),
+                         total_action_taken = col_number(),
+                         warning_letters = col_number(),
+                         fixed_penalty_notices = col_number(),
+                         statutory_notices = col_number(),
+                         formal_cautions = col_number(),
+                         injunctions = col_number(),
+                         prosecutions = col_number()
+                       ))
+```
+
+
+
