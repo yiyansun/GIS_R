@@ -1,0 +1,169 @@
+## packages
+
+```{r}
+#install.packages("here","janitor")
+library(here)
+library(dplyr)
+library(tidyverse)
+library(sf)
+library(janitor)
+
+# rm(list = ls())
+```
+
+## read data
+
+```{r}
+#row_to_delete <- LondonData[]
+LondonData <- read.csv("data/LondonData.csv",
+                          header = TRUE,
+                          sep=",",
+                          encoding = "latin1")
+# header = TRUE   the first row of the CSV file contains column names (headers). When set to TRUE, it tells R to treat the first row as column names
+#encoding = "latin1"   specifies the character encoding of the file
+
+#here::here()
+##LondonDataOSK<- read.csv(here::here("wk2","data","LondonData.csv"))
+```
+
+## examing new data
+
+```{r}
+# check what data type your new data set
+class(LondonData)
+# another two functions summarise_all() (from dplyr) and pivot_longer() (from tidyr) to check that our data has been read in correctly
+Datatypelist <- LondonData %>% 
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+Datatypelist
+```
+
+## edit data
+
+```{r}
+LondonData <- edit(LondonData)
+```
+
+## summarize data
+
+```{r}
+summary(LondonData)
+LondonData%>%
+  colnames()%>%
+  # just look at the head, top5
+  head()
+```
+
+## manipulate data
+
+```{r}
+# 1. select rows
+    #[]
+  ##LondonBoroughs <- LondonData[626:658,]
+    #dplyr--slice()
+  LondonBoroughs <- LondonData %>% 
+    slice(626:658)
+
+# 2. filter
+  Femalelifeexp<- LondonData %>%  
+   dplyr:::filter.data.frame(.,`Female.life.expectancy..2009.13`>90) 
+    #use backticks`` when column names contain spaces or special characters
+    ## cannot use in character format
+
+ ##  str_detect
+  LondonBoroughs <- LondonData %>% 
+    filter(str_detect(`New.code`, "^E09"))
+    # ^E09 "New code" starts with "E09"
+```
+
+```{r}
+# 3. select field
+  LondonBoroughs$Ward.name
+  ##  $
+  # same as
+  LondonBoroughs %>% 
+    dplyr::select(`Ward.name`) %>% 
+    print()
+  
+  # two rows at the top for the City of London, it features twice in the data set
+  # extract only unique rows
+  LondonBoroughs <- LondonBoroughs %>% 
+    distinct()
+  
+# 4. select columns
+  LondonBoroughs_manualcols <- LondonBoroughs[,c(1,19,20,21)]
+  
+  LondonBoroughs_dplyrcols <- LondonBoroughs %>% 
+    dplyr::select(c(1,19,20,21))
+  
+  ## select columns with certain words
+  LondonBoroughs_contains <- LondonBoroughs %>% 
+    dplyr::select(contains("expectancy",
+                           contains("Ward.name")))
+```
+
+```{r}
+# 5 rename columns
+LondonBoroughs <- LondonBoroughs %>%
+  dplyr::rename(borough=`Ward.name`) %>% 
+  clean_names
+  ## By defualt Janitor removes all capitals and uses an underscore wherever there is a space
+
+#janitor::clean_names
+  #LondonBoroughs <- LondonBoroughs %>% janitor::clean_names(., case="big_camel")
+  ## case="big_camel" = "column_name_example" might become "ColumnNameExample"
+```
+
+```{r}
+# 6. dplyr::mutate()
+  # add new variables based on existing ones
+
+## a.the average of male and female life expectancy together
+## b.a normalised value for each London borough based on the London average.
+
+
+is.numeric(Femalelifeexp) # false
+
+Life_expectancy <- LondonBoroughs %>% 
+  #new column with average of male and female life expectancy
+  mutate(averagelifeexpectancy=(female_life_expectancy_2009_13+male_life_expectancy_2009_13)/2) %>% 
+  #new column with normalised life expectancy
+  mutate(normaliselifeexpectancy=averagelifeexpectancy/mean(averagelifeexpectancy)) %>% 
+  #select only columns we want
+  dplyr::select(new_code,
+                borough,
+                averagelifeexpectancy,
+                normaliselifeexpectancy) %>% 
+  #arrange in descending order
+  #ascending is the default and would be
+  #arrange(normalisedlifeepectancy)
+  arrange(desc(normaliselifeexpectancy))
+
+# show the top and bottom number of rows
+slice_head(Life_expectancy,n=5)
+slice_tail(Life_expectancy,n=5)
+```
+
+```{r}
+# 7. dplyr::case_when()
+Life_expectancy2 <- Life_expectancy %>%
+  mutate(UKcompare=case_when(averagelifeexpectancy>81.16~"above UK average",TRUE~"below UK average"))
+
+```
+
+```{r}
+# 8. group_by
+Life_expectancy2_group <- Life_expectancy2 %>%
+  mutate(UKdiff = averagelifeexpectancy-81.16) %>%
+  group_by(UKcompare)%>%
+  summarise(range=max(UKdiff)-min(UKdiff), count=n(), Average=mean(UKdiff))
+
+
+
+```
+
+
+
+
