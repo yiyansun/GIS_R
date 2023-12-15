@@ -10,6 +10,11 @@ output: html_document
 3. Describe the assumptions associated with regression models
 4. Explain steps to deal with spatially autocorrelated (spatial similarity of nearby observations) residuals.
 
+- the common steps that you should go through when building a regression model using spatial data 
+to test a stated research hypothesis; 
+- from carrying out some descriptive visualisation and summary statistics, 
+to interpreting the results and using the outputs of the model to inform your next steps.
+
 # Task:
   explore the factors that might affect the average exam scores of 16 year-old across London. 
   GSCEs are the exams taken at the end of secondary education and here have been aggregated for all pupils at their home addresses across the City for Ward geographies.
@@ -30,6 +35,7 @@ library(crosstalk)
 library(leaflet)
 library(spdep)
 library(car)
+library(spgwr)
 library(fs)
 library(janitor)
 library(tidypredict)
@@ -102,26 +108,41 @@ Datatypelist
 ```
 
 # data merge
+```{r}
+#We can use readr to deal with the issues in this dataset - which are to do with text values being stored in columns containing numeric values
 
+#read in some data - couple of things here. Read in specifying a load of likely 'n/a' values, also specify Latin1 as encoding as there is a pound sign (£) in one of the column headers - just to make things fun!
+
+LondonWardProfiles <- read_csv("https://data.london.gov.uk/download/ward-profiles-and-atlas/772d2d64-e8c6-46cb-86f9-e52b4c7851bc/ward-profiles-excel-version.csv", 
+                               na = c("", "NA", "n/a"), 
+                               locale = locale(encoding = 'Latin1'), 
+                               col_names = TRUE)
+```
+
+boundary data and your attribute data, you need to merge the two together using a common ID
+`ward codes`
 ```{r}
 #merge boundaries and data
-LondonWardProfiles <- Londonwards %>% 
-  left_join(.,LondonWardProfiles,
-            by=c("GSS_CODE"="New code"))
+LonWardProfiles <- Londonwards%>%
+  left_join(.,
+            LondonWardProfiles, 
+            by = c("GSS_CODE" = "New code"))
 ```
 
 plot LondonWardProfiles
 
 ```{r}
+#let's map our dependent variable to see if the join has worked:
 tmap_mode("plot")
-qtm(LondonWardProfiles, 
+qtm(LonWardProfiles, 
     fill = "Average GCSE capped point scores - 2014", 
-    borders = "gray",  
+    borders = NULL,  
     fill.palette = "Blues")
 ```
 
 # additional data- london schools
 
+add some contextual data. While our exam results have been recorded at the home address of students, most students would have attended one of the schools in the City.
 ```{r}
 # add some contextual data (school data)
 
@@ -144,12 +165,12 @@ qtm(london_sec_schools_sf)
 
 explore the factors that might influence GCSE exam performance in London
 
--regression model: 
+- regression model: 
   a linear relationship between our outcome variable (Average GCSE score in each Ward in London) and another variable or several variables that might explain this outcome
 
 ## 1. Research Question and Hypothesis
 
-What are the factors that might lead to variation in Average GCSE point scores across the city?
+`What are the factors that might lead to variation in Average GCSE point scores across the city?`
 
   Null hypothesis: there is no relationship between the Average GCSE point scores and the other variables
 
@@ -170,6 +191,10 @@ q <- qplot(x = `Unauthorised Absence in All Schools (%) - 2013`,
 q + stat_smooth(method="lm", se=FALSE, size=1) + geom_jitter(width=0.1)
 ```
 
+null: there is no relationship between GCSE scores and unauthorised absence from school. If this null hypothesis was true, then I would not expect to see any pattern in the cloud of points plotted above.
+
+This is not a random cloud of points, but something that indicates there could be a relationshp here and so I might be looking to reject my null hypothesis.
+
 ## 3. Running a Regression Model in R
 
 ```{r}
@@ -184,23 +209,42 @@ model1 <- Regressiondata %>%
   lm(average_gcse_capped_point_scores_2014 ~
                unauthorised_absence_in_all_schools_percent_2013,
      data=.)
+
+# the tilde ~ symbol means “is modelled by”
 ```
 
 ```{r}
 summary(model1)
 ```
+
 ### 3.1 Interpreting and using the model outputs 
 
+In running a regression model, we are effectively trying to test (`disprove) our null hypothesis`. If our null hypothesis was true, then we would expect our coefficients to = 0
+
+- Coefficient Estimates: 
+  intercept and slope
+- Coefficient Standard Errors: 
+  how much the coefficients vary from the mean
+
+- Coefficient t-value - this is the value of the coefficient divided by the standard error and so can be thought of as a kind of standardised coefficient value. The larger (either positive or negative) the value the greater the relative effect that particular independent variable is having on the dependent variable (this is perhaps more useful when we have several independent variables in the model) .系数值除以标准误差，因此可以看作是一种标准化的系数值。该值越大（无论是正值还是负值），说明特定自变量对因变量的相对影响越大（当模型中有多个自变量时，这可能更有用
+- `Coefficient p-value - Pr(>|t|)`:
+  0.05 is the threshold for statistical significance. If the p-value is less than 0.05 then we can reject the null hypothesis and say that there is a statistically significant relationship between the independent and dependent variables. If the p-value is greater than 0.05 then we cannot reject the null hypothesis and say that there is no statistically significant relationship between the independent and dependent variables. 0.05是统计显著性的阈值。如果p值小于0.05，则可以拒绝零假设，并说独立变量和因变量之间存在统计显着关系。如果p值大于0.05，则不能拒绝零假设，并说独立变量和因变量之间不存在统计显着关系。
+
+- R-Squared 
+ This can be thought of as an indication of how good your model is - a measure of ‘goodness-of-fit’ (of which there are a number of others)
+ In our example, an r2 value of 0.42 indicates that around 42% of the variation in GCSE scores can be explained by variation in unathorised absence from school. In other words, this is quite a good model. The r2value will increase as more independent explanatory variables are added into the model, so where this might be an issue, the adjusted r-squared value can be used to account for this affect
 
 ### 3.2 broom
 
+The tidy() function will just make a tibble or the statistical findings from the model
 ```{r}
 tidy(model1)
 ```
-
+use glance() from broom to get a bit more summary information, such as r2 and the adjusted r-squared value
 ```{r}
 glance(model1)
 ```
+with the tidypredict_to_column() function from tidypredict, which adds the fit column in the following code. This column contains the predicted values from the model
 ```{r}
 Regressiondata %>%
   tidypredict_to_column(model1)
@@ -208,43 +252,490 @@ Regressiondata %>%
 
 ## 4. tidymodels
 
+```{r}
+# set the model
+lm_mod <- linear_reg()
 
-## 5. Bootstrap resampling
+# fit the model
+lm_fit <- 
+  lm_mod %>% 
+  fit(average_gcse_capped_point_scores_2014 ~
+               unauthorised_absence_in_all_schools_percent_2013,
+     data=Regressiondata)
+
+# we cover tidy and glance in a minute...
+tidy(lm_fit)
+```
+```{r}
+glance(lm_fit)
+```
+## 5. Bootstrap resampling引导重取样
+
+If we only fit our model once, how can we be confident about that estimate? Bootstrap resampling is where we take the original dataset and select random data points from within it, but in order to keep it the same size as the original dataset some records are duplicated. This is known as bootstrap resampling by replacement. 如果我们只对模型进行一次拟合，我们如何对估计结果有信心？Bootstrap 重采样就是我们从原始数据集中随机选择数据点，但为了保持与原始数据集相同的大小，有些记录是重复的。这就是所谓的替换引导重采样。
+only care about average GCSE scores and unauthorised absecne in schools
+
+```{r}
+Bootstrapdata<- LonWardProfiles%>%
+  clean_names()%>%
+  dplyr::select(average_gcse_capped_point_scores_2014, 
+                unauthorised_absence_in_all_schools_percent_2013)
+```
+
+接下来，我们将使用 `bootstraps()` 函数创建样本。首先，我们设置种子（任意数字），这意味着如果我们重新运行该分析，结果将是相同的，如果不这样做，由于我们是随机替换数据，下次运行代码时结果可能会改变。Next we are going to create our samples using the function bootstraps(). First we set the `seed` (to any number), which just means are results will be the same if we are to re-run this analysis, if we don’t then as we are randomly replacing data the next time we do run the code the results could change.
+
+在这里，我们创建了 1000 个版本的原始数据（times=1000）。显然，这意味着我们使用了整个数据集，而完整的数据集将保存在 GSCE_boot 变量中。set.seed(number) 只是确保我们每次都能得到相同的结果，因为结果可能会不同。
+
+```{r}
+set.seed(99)
+
+GCSE_boot <-st_drop_geometry(Bootstrapdata) %>%
+  bootstraps(times = 1000, apparent = TRUE)
+
+
+slice_tail(GCSE_boot, n=5)
+```
+
+因此，当我们查看 GSCE_boot 时，我们有 1000 条记录，加上我们的表观数据。
+
+现在，我们要对每个引导重采样实例运行线性回归模型。为此，我们将使用 purrr 软件包中的 map() 函数，它也是 tidyverse 的一部分。这让我们可以将一个函数（即我们的回归公式）应用到一个列表（即我们通过引导重采样计算出的拆分结果）
+
+我们需要映射，然后将函数赋予我们要映射的对象。因此，我们要映射（或更改）我们的拆分（从引导重采样），然后对每个拆分应用我们的回归公式。为了确保能保存输出结果，我们将使用 mutate() 函数创建一列名为 model 的新列，记住，这只是让我们在现有表格中添加一列。
+
+```{r}
+GCSE_models_tidy <- GCSE_models %>%
+  mutate(
+    coef_info = map(model, tidy))
+```
+
+So this has just added the information about our coefficents to a new column in the original table, but what if we actually want to extract this information, well we can just use `unnest()` from the tidyr package (also part of the tidyverse) that takes a list-column and makes each element its own row. I know it’s a list column as if you just explore GCSE_models_tidy (just run that in the console) you will see that under coef_info column title it says list. 因此，这只是将系数信息添加到原始表格的新列中，但如果我们真的想提取这些信息，我们可以使用 tidyr 包（也是 tidyverse 的一部分）中的 unnest()，它可以获取一个列表列，并将每个元素变成自己的一行。我知道这是一个列表列，因为如果你探索 GCSE_models_tidy（只需在控制台中运行），就会看到 coef_info 列标题下写着 list。
+
+```{r}
+GCSE_coef <- GCSE_models_tidy %>%
+  unnest(coef_info)
+GCSE_coef
+```
+
+If you look in the tibble GCSE_coef you will notice under the column heading term that we have intercept and unathorised absence values, here we just want to see the variance of coefficients for unauthorised absence, so let’s filter it…如果您查看 GCSE_coef 数据集，您会发现在列标题 term 下有截距和未经批准的缺席值，这里我们只想查看未经批准缺席的系数方差，因此让我们对其进行筛选...
+
+```{r}
+coef %>%
+  ggplot(aes(x=estimate)) +
+  geom_histogram(position="identity", 
+                 alpha=0.5, 
+                 bins=15, 
+                 fill="lightblue2", col="lightblue3")+
+  geom_vline(aes(xintercept=mean(estimate)),
+                 color="blue",
+             linetype="dashed")+
+  labs(title="Bootstrap resample estimates",
+       x="Coefficient estimates",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Now, wouldn’t it be useful to get some confidence intervals based on our bootstrap resample. Well! we can using the int_pctl() from the rsample package, which is also part of tidymodels.
+现在，根据我们的引导重采样得到一些置信区间不是很有用吗？我们可以使用 rsample 软件包中的 int_pctl()，它也是 tidymodels 的一部分。
+
+在这里，我们给函数提供我们的模型（GCSE_models_tidy），告诉它统计量在哪一列（coef_info），指定显著性水平（alpha）。如果你还记得，我们在前面将表面参数设置为 true，这是因为 int_pctl() 要求这样做
+Here, we give the function our models (GCSE_models_tidy), tell it what column the statstics are in (coef_info), specify the level of significance (alpha). Now if you recall we set the apparent argument to true earlier on and this is because this is a requirement of int_pctl()
+
+```{r}
+int_pctl(GCSE_models_tidy, coef_info, alpha = 0.05)
+```
+A change in 1% of unathorised absence reduces the average GCSE point score between between 37.1 and 45.2 points (this is our confidence interval) with a 95% confidence level.在 95% 的置信水平下，1% 的未经宣誓缺席会使 GCSE 平均得分降低 37.1 到 45.2 分（这是我们的置信区间）
+
+we can also change alpha to 0.01, which would be the 99% confidence level, but you’d expect the confidence interval range to be greater.我们也可以将 alpha 改为 0.01，即 99% 的置信水平，但置信区间的范围会更大。
+
+Here our confidence level means that if we ran the same regression model again with different sample data we could be 95% sure that those values would be within our range here.在这里，我们的置信度意味着，如果我们使用不同的样本数据再次运行相同的回归模型，我们可以 95% 地确定这些值将在我们的置信区间范围内。
+
+Confidence interval = the range of values that a future estimate will be betweeen置信区间 = 未来估计值的取值范围
+
+Confidence level = the perctange certainty that a future value will be between our confidence interval values
+置信水平 = 未来值将在我们的置信区间值之间的百分比确定性
+
+Now lets add our predictions to our original data for a visual comparison, we will do this using the augment() function from the package broom, again we will need to use unnest() too.
+
+```{r}
+GCSE_aug <- GCSE_models_tidy %>%
+  #sample_n(5) %>%
+  mutate(augmented = map(model, augment))%>%
+  unnest(augmented)
+```
+
+There are so many rows in this tibble as the statistics are produced for each point within our original dataset and then added as an additional row. However, note that the statistics are the same within each bootstrap, we will have a quick look into this now.
+由于统计量是针对原始数据集中的每个点生成的，然后作为附加行添加到数据集中，因此该数据集中有很多行。不过，请注意，每次自举的统计数据都是相同的，我们现在就来快速了解一下。
+
+因此，我们从伦敦选区概况图层中得知我们有 626 个数据点，请与以下数据进行核对：
+So we know from our London Ward Profiles layer that we have 626 data points, check this with:
+
+```{r}
+firstboot<-filter(GCSE_aug,id=="Bootstrap0001")
+
+firstbootlength <- firstboot %>%
+  dplyr::select(average_gcse_capped_point_scores_2014)%>%
+  pull()%>%
+  length()
+
+#nrow(firstboot)
+```
+
+Ok, so how do we know that our coefficient is the same for all 626 points within our first bootstrap? Well we can check all of them, but this would just print the coefficent info for all 262….
+
+what are the unique values within our coefficient info?
+
+```{r}
+uniquecoefficent <- firstboot %>%
+  #select(average_gcse_capped_point_scores_2014) %>%
+  dplyr::select(coef_info)%>%
+  unnest(coef_info)%>%
+  distinct()
+
+uniquecoefficent
+```
+
+```{r}
+ggplot(GCSE_aug, aes(unauthorised_absence_in_all_schools_percent_2013,
+                  average_gcse_capped_point_scores_2014))+
+  # we want our lines to be from the fitted column grouped by our bootstrap id
+  geom_line(aes(y = .fitted, group = id), alpha = .2, col = "cyan3") +  
+  # remember out apparent data is the original within the bootstrap
+  geom_point(data=filter(GCSE_aug,id=="Apparent"))+
+  #add some labels to x and y
+  labs(x="unauthorised absence in all schools 2013 (%)",
+       y="Average GCSE capped point scores 2014")
+```
+你会发现这幅图与我们在回归基础知识中绘制的图略有不同，因为我们使用的是 geom_point()，而不是 geom_jitter()。如果改用 geom_point()，你将得到与我们刚才绘制的相同的曲线图（除了自举拟合线之外）。
 
 
 ## 6. Variables
+- 我的变量必须是正态分布的
 
+正确答案是否定的。尽管不同的学者有不同的回答。如果数据不呈正态分布，残差也可能不呈正态分布（因此我才在这里提出），不过这可能是所选模型/自变量的问题，而不是数据的问题。残差很可能是正态分布的，但也可能会有变化（这意味着我们存在hetroscedasticity），我们稍后会讨论这个问题。因此，只有在数据非常偏斜的情况下，才可能需要对数据进行转换。
 
+- 如何选择变量
+
+通过logic and reasoning (e.g. in the exam), with the support of academic literature or methods such as best subset regression, k-fold cross validation or gradient descent 逻辑推理（如在考试中）、学术文献或最佳子集回归、k-fold 交叉验证或梯度下降等方法进行选择。这不是本单元的一部分。其他回归方法，如 Ridge、LASSO 和弹性网回归，可以减少模型中无用变量的影响。但这同样超出了本模块的范围。
+
+- 是否应该集中和扩展我的数据
+这意味着所有变量的均值都是 0（居中），标准差都是 1（缩放）。具体做法是从每个值中减去均值，再除以标准差（后一部分通常称为标准化）。关于何时进行标准化，有很多争论。Neal Goldstein 提供了一份很好的清单，列出了为什么以及什么时候应该这样做，本博客也提供了很好的解释。通常情况下，原因可能包括多重共线性和数据范围的巨大差异。要解释其中的系数，可以将它们转换回来。但这并不是本模块的一部分。
+
+- 什么是混杂变量
+
+混杂变量是指无关变量（模型变量的外部变量）与因变量和自变量（用于预测因变量的变量）相关。
+
+混杂变量必须是与其他自变量相关（见假设 3--自变量中无多重线性关系）
+与因变量有因果关系--已知会影响因变量
+
+However, in our work, if our independent variables are correlated we might remove the one that has least influence on the model to resolve this situation.
 
 ## 7. Assumptions Underpinning Linear Regression
 
 ### 7.1 Assumption 1 - There is a linear relationship between the dependent and independent variables
 
+plot a scatter plot
+frequency distributions of the variables
+
+```{r}
+#let's check the distribution of these variables first
+
+ggplot(LonWardProfiles, aes(x=`Average GCSE capped point scores - 2014`)) + 
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 5) + 
+  geom_density(colour="red", 
+               size=1, 
+               adjust=1)
+```
+
+```{r}
+ggplot(LonWardProfiles, aes(x=`Unauthorised Absence in All Schools (%) - 2013`)) +
+  geom_histogram(aes(y = ..density..),
+                 binwidth = 0.1) + 
+  geom_density(colour="red",
+               size=1, 
+               adjust=1)
+```
+relatively ‘normally’ or gaussian disributed, and thus more likely to have a linear correlation (if they are indeed associated).
+
+```{r}
+# from 21/10 there is an error on the website with 
+# median_house_price_2014 being called median_house_price<c2>2014
+# this was corrected around 23/11 but can be corrected with rename..
+
+LonWardProfiles <- LonWardProfiles %>%
+  #try removing this line to see if it works...
+  dplyr::rename(median_house_price_2014 =`Median House Price (£) - 2014`)%>%
+  janitor::clean_names()
+
+ggplot(LonWardProfiles, aes(x=median_house_price_2014)) + 
+  geom_histogram()
+```
+a not normal and/or positively ‘skewed’ distribution
+
+plot the raw house price variable against GCSE scores, we get the following scatter 
+```{r}
+qplot(x = median_house_price_2014, 
+      y = average_gcse_capped_point_scores_2014, 
+      data=LonWardProfiles)
+```
+This indicates that we do not have a linear relationship, indeed it suggests that this might be a curvilinear relationship.
 
 #### 7.1.1 Transforming variables
 
+Tukey’s ladder of transformations
+
+```{r}
+ggplot(LonWardProfiles, aes(x=log(median_house_price_2014))) + 
+  geom_histogram()
+```
+symbox() function in the car package to try a range of transfomations along Tukey’s ladder
+
+```{r}
+symbox(~median_house_price_2014, 
+       LonWardProfiles, 
+       na.rm=T,
+       powers=seq(-3,3,by=.5))
+```
+raising our house price variable to the power of -1 should lead to a more normal distribution
+
+- Rules for interpretation
+https://library.virginia.edu/data/articles/interpreting-log-transformations-in-a-linear-model
 
 #### 7.1.2 Should I transform my variables?
 
-
 ### 7.2 Assumption 2 - The residuals in your model should be normally distributed
 
+augment() from broom
+```{r}
+#save the residuals into your dataframe
+
+model_data <- model1 %>%
+  augment(., Regressiondata)
+
+#plot residuals
+model_data%>%
+dplyr::select(.resid)%>%
+  pull()%>%
+  qplot()+ 
+  geom_histogram() 
+```
+our residuals look to be relatively normally distributed
 
 ### 7.3 Assumption 3 - No Multicolinearity in the independent variables
 
+```{r}
+Regressiondata2<- LonWardProfiles%>%
+  clean_names()%>%
+  dplyr::select(average_gcse_capped_point_scores_2014,
+         unauthorised_absence_in_all_schools_percent_2013,
+         median_house_price_2014)
+
+model2 <- lm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014), data = Regressiondata2)
+
+#show the summary of those outputs
+tidy(model2)
+```
+
+```{r}
+glance(model2)
+```
+
+```{r}
+#and for future use, write the residuals out
+model_data2 <- model2 %>%
+  augment(., Regressiondata2)
+
+# also add them to the shapelayer
+LonWardProfiles <- LonWardProfiles %>%
+  mutate(model2resids = residuals(model2))
+```
+48% of the variance in GCSE scores is explained by the model
+Median house price is also a statistically significant variable, but the unauthorised absence variable is not.
+
+- multicolinearity
+do our two explanatory variables satisfy the no-multicoliniarity assumption? If not and the variables are highly correlated, then we are effectively double counting the influence of these variables and overstating their explanatory power.
+
+compute the product moment correlation coefficient between the variables, using the corrr() pacakge, that’s part of tidymodels. In an ideal world, we would be looking for something less than a 0.8 correlation between variables.
+```{r}
+Correlation <- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(average_gcse_capped_point_scores_2014,
+         unauthorised_absence_in_all_schools_percent_2013,
+         median_house_price_2014) %>%
+  mutate(median_house_price_2014 =log(median_house_price_2014))%>%
+    correlate() %>%
+  # just focus on GCSE and house prices
+  focus(-average_gcse_capped_point_scores_2014, mirror = TRUE) 
+
+
+#visualise the correlation matrix
+rplot(Correlation)
+```
+here is a low correlation (around 30%) between our two independent variables.
+
 
 #### 7.3.1 Variance Inflation Factor (VIF)
+```{r}
+vif(model2)
+
+```
+
+Both the correlation plots and examination of VIF indicate that our multiple regression model meets the assumptions around multicollinearity and so we can proceed further.
+
+```{r}
+position <- c(10:74)
+
+Correlation_all<- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(position)%>%
+    correlate()
+```
+
+```{r}
+rplot(Correlation_all)
+```
 
 
-### 7.4 Assumption 4 - Homoscedasticity
+### 7.4 Assumption 4 - Homoscedasticity同方差
+
+Homoscedasticity means that the errors/residuals in the model exhibit constant / homogenous variance, if they don’t, then we would say that there is hetroscedasticity present.
+
+if your errors do not have constant variance, then your parameter estimates could be wrong, as could the estimates of their significance.如果误差不具有恒方差，那么你的参数估计可能是错误的，对其显著性的估计也可能是错误的
+
+The best way to check for homo/hetroscedasticity is to plot the residuals in the model against the predicted values.
+
+```{r}
+#print some model diagnositcs. 
+par(mfrow=c(2,2))    #plot to 2 by 2 array
+plot(model2)
+```
+
+the first plot (residuals vs fitted), we would hope to find a random cloud of points with a straight horizontal red line. Looking at the plot, the curved red line would suggest some hetroscedasticity, but the cloud looks quite random.在第一幅图（残差与拟合值）中，我们希望找到一个随机的、水平红线笔直的点云。从图中可以看出，弯曲的红线表明存在一定的同向弹性，但点云看起来非常随机。
+Similarly we are looking for a random cloud of points with no apparent patterning or shape in the third plot of standardised residuals vs fitted values. Here, the cloud of points also looks fairly random, with perhaps some shaping indicated by the red line.同样，在第三幅标准化残差与拟合值对比图中，我们也在寻找没有明显模式或形状的随机点云。这里的点云看起来也相当随机，也许红线显示了一些形状
+
+- Residuals vs Fitted: a flat and horizontal line. This is looking at the linear relationship assumption between our variables
+残差与拟合：一条平坦的水平线。这是对变量之间线性关系的假设
+
+- Normal Q-Q: all points falling on the line. This checks if the residuals (observed minus predicted) are normally distributed正态 Q-Q：所有点都落在直线上。这将检查残差（观测值减去预测值）是否呈正态分布
+
+- Scale vs Location: flat and horizontal line, with randomly spaced points. This is the homoscedasticity (errors/residuals in the model exhibit constant / homogeneous variance). Are the residuals (also called errors) spread equally along all of the data.
+刻度与位置：平直水平线，各点间距随机。这就是同方差性（模型中的误差/残差表现出恒定/同方差）。残差（也称误差）是否沿所有数据平均分布。
+
+- Residuals vs Leverage - Identifies outliers (or influential observations), the three largest outliers are identified with values in the plot.残差与杠杆率 - 识别离群值（或有影响的观测值），图中用数值识别出三个最大的离群值。
 
 
+There is an easier way to produce this plot using check_model() from the performance package, that even includes what you are looking for…note that the Posterior predictive check is the comparison between the fitted model and the observed data.
 
+```{r}
+check_model(model2, check="all")
+```
 
-### 7.5 Assumption 5 - Independence of Errors
+### 7.5 Assumption 5 - Independence of Errors误差的独立性
 
+这一假设简单地说，就是模型中的残差值（误差）不能有任何相关性。如果它们存在相关性，那么它们就会表现出自相关性，这表明我们的模型中可能没有充分考虑到某些背景因素。这种情况下，我们需要使用空间回归模型来解决这个问题
 
 #### 7.5.1 Standard Autocorrelation
+If you are running a regression model on data that do not have explicit space or time dimensions, then the standard test for autocorrelation would be the `Durbin-Watson test`.
+
+This tests whether residuals are correlated and produces a summary statistic that ranges between 0 and 4, with 2 signifiying no autocorrelation. A value greater than 2 suggesting negative autocorrelation and and value of less than 2 indicating postitve autocorrelation.
+
+```{r}
+#run durbin-watson test
+DW <- durbinWatsonTest(model2)
+tidy(DW)
+```
+the DW statistics for our model is 1.61, so some indication of autocorrelation, but perhaps nothing to worry about.
+
+*HOWEVER*
+We are using spatially referenced data and as such we should check for `spatial-autocorrelation`.
+
+The first test we should carry out is to map the residuals to see if there are any apparent obvious patterns:
+
+```{r}
+#now plot the residuals
+tmap_mode("view")
+#qtm(LonWardProfiles, fill = "model1_resids")
+
+tm_shape(LonWardProfiles) +
+  tm_polygons("model2resids",
+              palette = "RdYlBu") +
+tm_shape(london_sec_schools_sf) + tm_dots(col = "TYPE")
+```
+there look to be some blue areas next to other blue areas and some red/orange areas next to other red/orange areas. 
+This suggests that there could well be some `spatial autocorrelation biasing our model`, but can we test for spatial autocorrelation more systematically?
+
+calculate a number of different statistics to check for spatial autocorrelation - the most common of these being `Moran’s I` and Geary’s C.
+
+```{r}
+#calculate the centroids of all Wards in London
+coordsW <- LonWardProfiles%>%
+  st_centroid()%>%
+  st_geometry()
+
+plot(coordsW)
+
+#Now we need to generate a spatial weights matrix 
+#(remember from the lecture a couple of weeks ago). 
+#We'll start with a simple binary matrix of queen's case neighbours
+
+LWard_nb <- LonWardProfiles %>%
+  poly2nb(., queen=T)
+
+#or nearest neighbours
+knn_wards <-coordsW %>%
+  knearneigh(., k=4)
+
+LWard_knn <- knn_wards %>%
+  knn2nb()
+
+#plot them
+plot(LWard_nb, st_geometry(coordsW), col="red")
+
+plot(LWard_knn, st_geometry(coordsW), col="blue")
+
+#create a spatial weights matrix object from these weights
+
+Lward.queens_weight <- LWard_nb %>%
+  nb2listw(., style="W")
+
+Lward.knn_4_weight <- LWard_knn %>%
+  nb2listw(., style="W")
+```
+
+The `style` argument means the style of the output — `B` is binary encoding listing them as neighbours or not, `W` row standardised that we saw last week.
+
+run a moran’s I test on the residuals, first using queens neighbours
+```{r}
+Queen <- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(model2resids)%>%
+  pull()%>%
+  moran.test(., Lward.queens_weight)%>%
+  tidy()
+```
+Then nearest k-nearest neighbours
+
+```{r}
+Nearest_neighbour <- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(model2resids)%>%
+  pull()%>%
+  moran.test(., Lward.knn_4_weight)%>%
+  tidy()
+
+Queen
+
+Nearest_neighbour
+```
+Observing the Moran’s I statistic for both Queen’s case neighbours and k-nearest neighbours of 4, we can see that the Moran’s I statistic is somewhere between 0.27 and 0.29. Remembering that Moran’s I ranges from between -1 and +1 (0 indicating no spatial autocorrelation) we can conclude that there is some weak to moderate spatial autocorrelation in our residuals.
+残差中存在一些弱到中等程度的空间自相关性。
+
+这意味着，尽管我们通过了线性回归的大部分假设，但由于存在一定的空间自相关性，可能会导致我们对参数和显著性值的估计存在偏差
+This means that despite passing most of the assumptions of linear regression, we could have a situation here where the presence of some spatial autocorrelation could be leading to biased estimates of our parameters and significance values.
+
+##### waywise
+build a weight matrix and then run spatial autocorrelation in model residuals) in just a few lines of code
 
 
 
@@ -253,7 +744,542 @@ Regressiondata %>%
 ### 8.1 Dealing with Spatially Autocorrelated Residuals - Spatial Lag and Spatial Error models
 
 #### 8.1.1 The Spatial Lag (lagged dependent variable) model
+空间滞后（滞后因变量）模型
 
+在我们运行的上述示例模型中，我们正在检验一个零假设，即伦敦不同选区中学生的 GCSE 平均成绩与其他解释变量之间不存在关系。运行回归模型来检验缺课和平均房价的影响时，早期迹象表明我们可以拒绝这一无假设，因为所运行的回归模型表明，GCSE 分数的变化有近 50%可以用未经授权的缺课和平均房价的变化来解释。
 
+然而，对模型的残差进行莫兰 I 检验后发现，可能存在一些空间自创现象，表明模型对 GCSE 分数预测过高（上图中蓝色显示的地方，残差为负）和预测过低（红色/橙色显示的地方）的地方偶尔会相互靠近
+
+将伦敦各中学的位置叠加到地图上，就会发现为什么会出现这种情况。伦敦的许多学校都位于或靠近学生所居住的选区。因此，在一所学校就读的学生很可能来自邻近的多个选区。
+
+`因此，一个选区的 GCSE 平均分可能与另一个选区的 GCSE 平均分相关，因为居住在这些选区的学生可能就读于同一所学校。这可能就是自相关性的来源`
+
+```{r}
+#Original Model
+model2 <- lm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014), data = LonWardProfiles)
+
+tidy(model2)
+```
 
 ##### 8.1.1.1 Queen’s case lag
+
+run a spatially-lagged regression model with a queen’s case weights matrix
+```{r}
+slag_dv_model2_queen <- lagsarlm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014), 
+               data = LonWardProfiles, 
+               nb2listw(LWard_nb, style="C"), 
+               method = "eigen")
+
+#what do the outputs show?
+tidy(slag_dv_model2_queen)
+```
+
+```{r}
+#glance() gives model stats but this need something produced from a linear model
+#here we have used lagsarlm()
+glance(slag_dv_model2_queen)
+
+t<-summary(slag_dv_model2_queen)
+
+sum(t$residuals)
+```
+
+Running the spatially-lagged model with a Queen’s case spatial weights matrix reveals that in this example, there is `an insignificant and small effect associated with the spatially lagged dependent variable`. However, a different conception of neighbours we might get a different outcome
+
+Here:
+
+`Rho` is our spatial lag (0.0051568) that measures the variable in the surrounding spatial areas as defined by the spatial weight matrix. We use this as an extra explanatory variable to account for clustering (identified by Moran’s I). If significant it means that the GCSE scores in a unit vary based on the GCSE scores in the neighboring units. If it is positive it means as the GCSE scores increase in the surrounding units so does our central value Rho 是我们的空间滞后值（0.0051568），用于衡量空间权重矩阵所定义的周边空间区域的变量。我们将其作为一个额外的解释变量来考虑聚类（由莫兰 I 确定）。如果显著，则意味着一个单位的 GCSE 分数根据邻近单位的 GCSE 分数而变化。如果是正值，则意味着随着周围单位的 GCSE 分数的增加，我们的中心值也会增加。
+
+`Log likelihood` shows how well the data fits the model (like the AIC, which we cover later), the higher the value the better the models fits the data. 对数似然显示数据与模型的拟合程度（如 AIC，我们稍后会介绍），值越高，模型与数据的拟合程度越好。
+
+`Likelihood ratio (LR)` test shows if the addition of the lag is an improvement (from linear regression) and if that’s significant. This code would give the same output as the LR test in the linear regression model. 似然比（LR）检验显示滞后的增加是否是一个改进（从线性回归）以及是否显著。这段代码将给出与线性回归模型中的 LR 检验相同的输出。
+
+```{r}
+lrtest(slag_dv_model2_queen, model2)
+```
+
+`Lagrange Multiplier (LM)` is a test for the absence of spatial autocorrelation in the lag model residuals. If significant then you can reject the Null (no spatial autocorrelation) and accept the alternative (is spatial autocorrelcation)
+拉格朗日乘数（LM）是对滞后模型残差是否存在空间自相关的检验。如果显著，则可以拒绝原假设（不存在空间自相关），接受替代假设（存在空间自相关）。
+
+`Wald test `(often not used in interpretation of lag models), it tests if the new parameters (the lag) should be included it in the model…if significant then the new variable improves the model fit and needs to be included. This is similar to the LR test and i’ve not seen a situation where one is significant and the other not. Probably why it’s not used! Wald 检验（通常不用于滞后模型的解释），它检验是否应将新参数（滞后）纳入模型......如果显著，则新变量可改善模型拟合，需要纳入模型。这与 LR 检验类似，我还没见过一个显著而另一个不显著的情况。也许这就是为什么不使用它的原因！
+
+In this case we have spatial autocorrelation in the residuals of the model, but the model is not an improvement on OLS — this can also be confirmed with the AIC score (we cover that later) but the lower it is the better. Here it is 5217, in OLS (model 2) it was 5215. The Log likelihood is the other way around but very close, model 2 (OLS) it was -2604, here it is -2603. 在这种情况下，我们的模型残差中存在空间自相关性，但模型并没有比 OLS 有所改进--这也可以通过 AIC 分数来确认（我们稍后会介绍），但 AIC 分数越低越好。这里是 5217，而 OLS（模型 2）是 5215。模型 2（OLS）的对数似然值是-2604，这里是-2603。
+
+##### 8.1.1.2 Lag impacts
+
+Warning according to Solymosi and Medina (2022) you must not not compare the coefficients of this to regular OLS
+
+在 OLS 回想中，我们可以使用系数来表示......自变量变化 1 个单位意味着因变量的下降或上升（未经授权的缺课增加 1%，GSCE 分数将下降-41.2 分）。Warning according to Solymosi and Medina (2022) you must not not compare the coefficients of this to regular OLS 但在这里，模型并不一致，因为观察结果会根据所选相邻权重矩阵的变化而变化（几乎肯定是基于距离的矩阵）。这意味着我们在模型中有直接影响（标准 OLS）和间接影响（空间滞后的影响）。
+
+我们可以使用 Solymosi 和 Medina（2022 年）的代码以及 spatialreg 软件包来计算这些直接和间接效应。这里的 impacts() 函数计算空间滞后的影响。我们可以将其与整个空间权重拟合....
+
+```{r}
+# weight list is just the code from the lagsarlm
+weight_list<-nb2listw(LWard_knn, style="C")
+
+imp <- impacts(slag_dv_model2_queen, listw=weight_list)
+
+imp
+```
+Now it is appropriate to compare these coefficients to the OLS outputs
+
+however if you have a very large matrix this might not work, instead a sparse matrix that uses approximation methods (see Solymosi and Medina (2022) and within that resource, Lesage and Pace 2009). This is beyond the scope of the content here, but essentially this makes the method faster on larger data…but only row standardised is permitted here
+
+```{r}
+slag_dv_model2_queen_row <- lagsarlm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014), 
+               data = LonWardProfiles, 
+               nb2listw(LWard_nb, style="W"), 
+               method = "eigen")
+
+
+W <- as(weight_list, "CsparseMatrix")
+
+trMatc <- trW(W, type="mult")
+trMC <- trW(W, type="MC")
+
+imp2 <- impacts(slag_dv_model2_queen_row, tr=trMatc, R=200)
+
+imp3 <- impacts(slag_dv_model2_queen_row, tr=trMC, R=200)
+
+imp2
+```
+
+```{r}
+imp3
+```
+
+get the p-values (where an R is set, this is the number of simulations to use)…from the sparse computation
+
+```{r}
+sum <- summary(imp2,  zstats=TRUE, short=TRUE)
+
+sum
+```
+The results on the entire datasets will differ as that used C which is a globally standardised weight matrix.整个数据集的结果将与所使用的 C（全球标准化权重矩阵）不同。
+
+In the sparse example, there are different two examples using slightly different arguments that control the sparse matrix, this is beyond the scope here (so don’t worry about it) but for reference….在稀疏示例中，有两个示例使用略有不同的参数来控制稀疏矩阵，这超出了本文的讨论范围（所以不用担心），但仅供参考....。
+
+- `mult`，用于稀疏矩阵的加权（默认值）（中等或更大 N 时，矩阵会变得密集，可能导致交换）mult which is (default) for powering a sparse matrix (with moderate or larger N, the matrix becomes dense, and may lead to swapping)
+
+- `MC` 用于迹线的蒙特卡罗模拟（前两个模拟迹线会被分析迹线所替代）MC for Monte Carlo simulation of the traces (the first two simulated traces are replaced by their analytical equivalents)
+
+提供这一额外步骤的目的是为了应对考试中的大型数据集，并希望计算直接和间接数据。*The purpose of providing this extra step is in case you have a large data set in the exam and wish to do compute the direct and indirect.*
+
+不过，在与亚当讨论这个问题时，他认为可以对不同模型的系数进行比较，因为从本质上讲，您仍在尝试对同一因变量进行建模
+
+##### 8.1.1.3 KNN case lag
+
+run a model with nearest neigh ours as opposed to queens neighbours
+
+```{r}
+#run a spatially-lagged regression model
+slag_dv_model2_knn4 <- lagsarlm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014), 
+               data = LonWardProfiles, 
+               nb2listw(LWard_knn, 
+                        style="C"), 
+               method = "eigen")
+
+#what do the outputs show?
+tidy(slag_dv_model2_knn4)
+```
+在空间权重矩阵中，使用 4 个近邻而不是只考虑所有相邻区域，空间滞后项的大小和显著性发生了很大变化。在 4 个近邻模型中，空间滞后项的大小和意义都发生了很大的变化，它是正的，而且在统计意义上是显著的（<0.05），相反，未经授权的缺席和（对数（房价中位数））的影响则减小了。记住......这就是我们对系数的解释...Using the 4 nearest neighbours instead of just considering all adjacent zones in the spatial weights matrix, the size and significance of the spatially lagged term changes quite dramatically. In the 4 nearest neighbour model it is both quite large, positive and statistically significant (<0.05), conversely the effects of unauthorised absence and (log (median house price)) are reduced. Remember…this is how we interpret the coefficients…
+
+之前，擅自缺课每增加 1%（或 1 个单位，因为变量是 %，所以是 %），意味着 GCSE 分数下降 -36.36 分，而现在只下降 -28.5 分。
+
+在这里，由于我们记录了房价中位数，我们必须遵循规则...
+
+将系数除以 100（原来是 12.65，现在是 9.29 = 0.1265 和 0.0929）
+自变量（房价中位数）每增加 1%，因变量（GCSE 成绩）就会增加约 0.09 分（之前为 0.12 分）
+
+What this means is that in our study area, the average GCSE score recorded in Wards across the city varies partially with the average GCSE score found in neighbouring Wards. Given the distribution of schools in the capital in relation to where pupils live, this makes sense as schools might draw pupils from a few close neighbouring wards rather than all neighbour bordering a particular Ward. 这意味着，在我们的研究区域内，全市各区的 GCSE 平均分与邻近各区的 GCSE 平均分存在部分差异。考虑到首都的学校分布与学生居住地的关系，这种情况是合理的，因为学校可能会从几个相邻的选区招收学生，而不是从与某个选区相邻的所有选区招收学生。
+
+实际上，由于忽略了原始 OLS 模型中空间自相关性的影响，未经授权的缺席和富裕程度（以平均房价为代表）的影响被略微夸大或夸大了（这意味着 OLS 系数过高）。
+
+我们现在还可以检查空间滞后模型的残差是否不再表现出空间自相关性：
+
+```{r}
+#write out the residuals
+
+LonWardProfiles <- LonWardProfiles %>%
+  mutate(slag_dv_model2_knn_resids = residuals(slag_dv_model2_knn4))
+
+KNN4Moran <- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(slag_dv_model2_knn_resids)%>%
+  pull()%>%
+  moran.test(., Lward.knn_4_weight)%>%
+  tidy()
+
+KNN4Moran
+```
+#### 8.1.2 The Spatial Error Model
+
+Another way of coneptualising spatial dependence in regression models is not through values of the dependent variable in some areas affecting those in neighbouring areas (as they do in the spatial lag model), but in treating the spatial autocorrelation in the residuals as something that we need to deal with, perhaps reflecting some spatial autocorrelation amongst unobserved independent variables or some other mis-specification of the model.
+在回归模型中将空间依赖性概念化的另一种方法不是通过某些地区的因变量值影响邻近地区的因变量值（如在空间滞后模型中那样），而是将`残差中的空间自相关性`视为我们需要处理的问题，它可能反映了未观测到的独立变量之间的空间自相关性或模型的其他一些错误规范。
+
+If there is no correlation between the then this defaults to normal OLS regression
+
+
+```{r}
+sem_model1 <- errorsarlm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014), 
+               data = LonWardProfiles,
+               nb2listw(LWard_knn, style="C"), 
+               method = "eigen")
+
+tidy(sem_model1)
+```
+
+将空间误差模型的结果与空间滞后模型和原始 OLS 模型进行比较，得出的结论是，残差中的空间相关误差导致高估了 OLS 模型中非法缺席的重要性，低估了以房价中位数为代表的富裕程度的重要性。相反，与空间滞后模型相比，空间误差模型对这两个变量的参数值估计更高。
+Comparing the results of the spatial error model with the spatially lagged model and the original OLS model, the suggestion here is that the spatially correlated errors in residuals lead to an over-estimate of the importance of unauthorised absence in the OLS model and an under-estimate of the importance of affluence, represented by median house prices. Conversely, the spatial error model estimates higher parameter values for both variables when compared to the spatially lagged model.
+
+Note, here we can compare to OLS as there is no spatial lag.
+请注意，这里我们可以与 OLS 进行比较，因为没有空间滞后。
+
+Both the  λ parameter in the spatial error model and the ρ parameter in the spatially lagged model are larger than their standard errors, so we can conclude that spatial dependence should be borne in mind when interpreteing the results of this regression model.在解释这一回归模型的结果时，应注意空间依赖性
+
+### 8.2 Key advicel
+
+滞后模型考虑了一个地区的因变量值可能与邻近地区（无论我们在空间权重矩阵中如何定义邻近地区）的因变量值相关联或受其影响的情况。以我们的例子为例，一个社区的 GCSE 平均分可能与另一个社区的 GCSE 平均分相关，因为这两个社区的学生可能在同一所学校就读。您也许还能想到其他可能出现类似关联的例子。如果您用莫兰 I 检验出因变量存在空间自相关性（较近的空间单位具有相似的数值），您可以运行滞后模型。
+The lag model accounts for situations where the value of the dependent variable in one area might be associated with or influenced by the values of that variable in neighbouring zones (however we choose to define neighbouring in our spatial weights matrix). With our example, average GCSE scores in one neighbourhood might be related to average GCSE scores in another as the students in both neighbourhoods could attend the same school. You may be able to think of other examples where similar associations may occur. You might run a lag model if you identify spatial autocorrelation in the dependent variable (closer spatial units have similar values) with Moran’s I.
+
+The error model deals with spatial autocorrelation (closer spatial units have similar values) of the residuals (vertical distance between your point and line of model – errors – over-predictions or under-predictions) again, potentially revealed though a Moran’s I analysis. The error model is not assuming that neighbouring independent variables are influencing the dependent variable but rather the assumption is of an issue with the specification of the model or the data used (e.g. clustered errors are due to some un-observed clustered variables not included in the model). For example, GCSE scores may be similar in bordering neighbourhoods but not because students attend the same school but because students in these neighbouring places come from similar socio-economic or cultural backgrounds and this was not included as an independent variable in the original model. There is no spatial process (no cross Borough interaction) just a cluster of an un-accounted for but influential variable.
+误差模型处理的是残差（您的点与模型线之间的垂直距离--误差--预测过高或过低）的空间自相关性（较近的空间单位具有相似的值），同样，通过莫兰 I 分析也可能发现这一点。误差模型并不是假定相邻的自变量会影响因变量，而是假定模型的规格或所使用的数据存在问题（例如，聚类误差是由于模型中未包含的某些未观察到的聚类变量造成的）。例如，邻近社区的 GCSE 分数可能相似，但这并不是因为学生就读于同一所学校，而是因为这些邻近地区的学 生来自相似的社会经济或文化背景，而这并没有作为自变量包含在原始模型中。没有空间过程（没有跨区互动），只有一个未考虑但有影响的变量群。
+
+Usually you might run a lag model when you have an idea of what is causing the spatial autocorrelation in the dependent variable and an error model when you aren’t sure what might be missing. However, you can also use a more scientific method - the Lagrange Multiplier test.通常情况下，当你知道是什么导致了因变量的空间自相关性时，你可能会运行滞后模型，而当你不确定是什么导致了因变量的空间自相关性时，你可能会运行误差模型。不过，您也可以使用更科学的方法--拉格朗日乘数检验。
+
+But! recall from a few weeks ago when I made a big deal of type of standardisation for the spatial weight matrix? This test expects row standardisation.
+但是！还记得几周前我在空间权重矩阵的标准化类型上大做文章吗？这个检验需要行标准化。
+
+拉格朗日多重检验是在 spdep 软件包中的函数 lm.LMtests 中进行的：
+The Lagrange multiple tests are within the function lm.LMtests from the package spdep:
+LMerr 是空间误差模型检验
+LMlag 是滞后检验
+LMerr 是空间误差模型检验，LMlag 是滞后检验，每种检验都有稳健形式，对不敏感变化（如异常值、非正态性）具有稳健性。
+LMerr is the spatial error model test
+LMlag is the lagged test
+With each also having a robust form, being robust to insensitivities to changes (e.g. outliers, non-normality).
+
+```{r}
+Lward.queens_weight_ROW <- LWard_nb %>%
+  nb2listw(., style="W")
+
+lm.LMtests(model2, Lward.queens_weight_ROW, test = c("LMerr","LMlag","RLMerr","RLMlag","SARMA"))
+```
+we look to see if either the standard tests LMerr or LMlag are significant (p <0.05), if one is then that is our answer. If both are move to the robust tests and apply the same rule. 在这里，我们要看标准检验 LMerr 或 LMlag 是否显著（p <0.05），如果其中一个显著，那就是我们的答案。如果两者都是，则转到稳健检验，并应用相同的规则。
+
+如果一切都很重要，那么安塞林教授（2008 年）建议：
+
+一个稳健检验往往比另一个显著得多。在这种情况下，选择最重要的模型。
+
+在两个模型都非常显著的情况下，选择最大的检验统计量值--但这里可能会违反回归假设
+
+Geographically weighted regression (GWR) will be explored next, but simply assumes that spatial autocorrelation is not a problem, but a global regression model of all our data doesn’t have the same regression slope - e.g. in certain areas (Boroughs, Wards) the relationship is different, termed non-stationary. GWR runs a local regression model for adjoining spatial units and shows how the coefficients can vary over the study area.
+接下来将探讨地理加权回归（GWR），它只是假设空间自相关性不是问题，但我们所有数据的整体回归模型并不具有相同的回归斜率--例如，在某些地区（区、行政区）的关系是不同的，称为非稳态。GWR 为相邻的空间单位运行局部回归模型，显示系数在研究区域内的变化情况。
+
+
+### 8.3 `Which model to use`
+
+Usually you will run OLS regression first then look for spatial autocorrelation of the residuals (Moran’s I).
+通常情况下，您会先运行 OLS 回归，然后查找残差的空间自相关性（莫兰 I）。
+
+一旦到了这个阶段，您就需要对模型做出决定：
+
+- 是全局模型（误差/滞后）还是局部模型（GWR）？
+Is it a global model (error / lag) or a local model (GWR)?
+
+- 单一模型（误差/滞后）能否适用于研究区域？Can a single model (error/lag) be fitted to the study area?
+
+- 空间自相关是一个问题（误差）还是显示局部趋势（GWR）？Is the spatial autocorrelation a problem (error) or showing local trends (GWR)?
+
+当然，您可以使用 OLS、空间滞后和 GWR 模型，只要它们都能为您的分析做出贡献。
+
+
+
+
+### more data
+
+```{r}
+extradata <- read_csv("https://www.dropbox.com/s/qay9q1jwpffxcqj/LondonAdditionalDataFixed.csv?raw=1")
+
+#add the extra data too
+LonWardProfiles <- LonWardProfiles%>%
+  left_join(., 
+            extradata, 
+            by = c("gss_code" = "Wardcode"))%>%
+  clean_names()
+
+#print some of the column names
+LonWardProfiles%>%
+  names()%>%
+  tail(., n=10)
+```
+
+### 8.4 Extending your regression model - Dummy Variables
+
+如果我们不是用一条线来拟合我们的点云，而是根据我们所分析的病房是否属于某个组别或其他组别来拟合几条线呢？例如，如果上学和取得好的考试成绩之间的关系在伦敦内城和外城之间有所不同，那又会怎样呢？我们能对此进行测试吗？当然可以，事实上非常容易。
+What if instead of fitting one line to our cloud of points, we could fit several depending on whether the Wards we were analysing fell into some or other group. What if the relationship between attending school and achieving good exam results varied between inner and outer London, for example. Could we test for that? Well yes we can - quite easily in fact.
+
+If we colour the points representing Wards for Inner and Outer London differently, we can start to see that there might be something interesting going on. Using 2011 data (as there are not the rounding errors that there are in the more recent data), there seems to be a stronger relationship between absence and GCSE scores in Outer London than Inner London. We can test for this in a standard linear regression model.
+如果我们将代表伦敦内区和外区的点用不同的颜色标示出来，我们就可以开始发现可能会有一些有趣的事情发生。使用 2011 年的数据（因为没有最近数据中的四舍五入误差），外伦敦的缺勤率和 GCSE 分数之间的关系似乎比内伦敦更密切。我们可以用标准线性回归模型来检验这一点。
+
+```{r}
+p <- ggplot(LonWardProfiles, 
+            aes(x=unauth_absence_schools11, 
+                y=average_gcse_capped_point_scores_2014))
+p + geom_point(aes(colour = inner_outer)) 
+```
+·Dummy variables· are always categorical data (inner or outer London, or red / blue etc.). When we incorporate them into a regression model, they serve the purpose of splitting our analysis into groups. In the graph above, it would mean, effectively, having a separate regression line for the red points and a separate line for the blue points.
+虚拟变量总是分类数据（伦敦内或伦敦外，或红色/蓝色等）。当我们将它们纳入回归模型时，它们的作用是将我们的分析分成不同的组。在上图中，这实际上意味着红色点有一条单独的回归线，蓝色点有一条单独的回归线。
+
+```{r}
+#first, let's make sure R is reading our InnerOuter variable as a factor
+#see what it is at the moment...
+isitfactor <- LonWardProfiles %>%
+  dplyr::select(inner_outer)%>%
+  summarise_all(class)
+```
+
+```{r}
+isitfactor
+```
+
+```{r}
+# change to factor
+
+LonWardProfiles<- LonWardProfiles %>%
+  mutate(inner_outer=as.factor(inner_outer))
+
+#now run the model
+model3 <- lm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014) + 
+               inner_outer, 
+             data = LonWardProfiles)
+ 
+tidy(model3)
+```
+
+Well, the dummy variable is statistically significant and the coefficient tells us the difference between the two groups (Inner and Outer London) we are comparing. In this case, it is telling us that living in a Ward in outer London will improve your average GCSE score by 10.93 points, on average, compared to if you lived in Inner London. The R-squared has increased slightly, but not by much. 这个虚拟变量在统计上是有意义的，系数告诉我们所比较的两组（伦敦内城和外城）之间的差异。在这种情况下，它告诉我们，与居住在伦敦内城相比，居住在伦敦外城的区将使你的 GCSE 平均成绩平均提高 10.93 分。R平方略有增加，但幅度不大。
+
+
+You will notice that despite there being two values in our dummy variable (Inner and Outer), we only get one coefficient. This is because with dummy variables, one value is always considered to be the control (comparison/reference) group. In this case we are comparing Outer London to Inner London. If our dummy variable had more than 2 levels we would have more coefficients, but always one as the reference. 您会注意到，尽管我们的虚拟变量有两个值（内伦敦和外伦敦），但我们只得到了一个系数。这是因为在使用虚拟变量时，总有一个值被视为对照（比较/参考）组。在这种情况下，我们将外伦敦与内伦敦进行比较。如果我们的虚拟变量有两个以上的水平，我们就会有更多的系数，但总是有一个作为参照
+
+The order in which the dummy comparisons are made is determined by what is known as a ‘contrast matrix’. This determines the treatment group (1) and the control (reference) group (0). We can view the contrast matrix using the contrasts() function: 进行虚拟比较的顺序由所谓的 "对比矩阵 "决定。这决定了治疗组（1）和对照（参照）组（0）。我们可以使用 contrasts() 函数查看对比矩阵：
+
+```{r}
+contrasts(LonWardProfiles$inner_outer)
+```
+
+If we want to change the reference group, there are various ways of doing this. We can use the contrasts() function, or we can use the relevel() function
+
+```{r}
+LonWardProfiles <- LonWardProfiles %>%
+  mutate(inner_outer = relevel(inner_outer, 
+                               ref="Outer"))
+
+model3 <- lm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+               log(median_house_price_2014) + 
+               inner_outer, 
+             data = LonWardProfiles)
+
+tidy(model3)
+```
+You will notice that the only thing that has changed in the model is that the coefficient for the inner_outer variable now relates to Inner London and is now negative (meaning that living in Inner London is likely to reduce your average GCSE score by 10.93 points compared to Outer London). The rest of the model is exactly the same. 模型中唯一的变化是 inner_outer 变量的系数现在与内伦敦有关，而且现在是负数（这意味着与外伦敦相比，居住在内伦敦可能会使您的 GCSE 平均成绩降低 10.93 分）。模型的其他部分完全相同。
+
+
+ when building a regression model in this way, you are trying to hit a sweet spot between increasing your R-squared value as much as possible, but with as few explanatory variables as possible.
+ 
+ 如果没有充分的理论依据来解释为什么变量会产生影响，就不应该随便向模型中添加变量。谨慎选择变量！
+
+如果一个新变量与之前的变量产生混淆（变得比之前的变量更重要），或者发现新变量并不重要，那么就要做好将其从模型中剔除的准备。
+
+例如，让我们试着加入与毒品有关的犯罪率（对数变量，因为它是正偏变量，而对数变量是正态变量）和每户家庭的汽车数量......这些变量是否重要？模型中的空间误差会发生什么变化？我们可以使用anova()函数来检查模型中的变化。
+
+### spatial Non-stationarity and Geographically Weighted Regression Models GWR
+
+```{r}
+#select some variables from the data file
+myvars <- LonWardProfiles %>%
+  dplyr::select(average_gcse_capped_point_scores_2014,
+         unauthorised_absence_in_all_schools_percent_2013,
+         median_house_price_2014,
+         rate_of_job_seekers_allowance_jsa_claimants_2015,
+         percent_with_level_4_qualifications_and_above_2011,
+         inner_outer)
+
+#check their correlations are OK
+Correlation_myvars <- myvars %>%
+  st_drop_geometry()%>%
+  dplyr::select(-inner_outer)%>%
+  correlate()
+
+#run a final OLS model
+model_final <- lm(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+                    log(median_house_price_2014) + 
+                    inner_outer + 
+                    rate_of_job_seekers_allowance_jsa_claimants_2015 +
+                    percent_with_level_4_qualifications_and_above_2011, 
+                  data = myvars)
+
+tidy(model_final)
+```
+
+```{r}
+LonWardProfiles <- LonWardProfiles %>%
+  mutate(model_final_res = residuals(model_final))
+
+par(mfrow=c(2,2))
+plot(model_final)
+```
+
+```{r}
+qtm(LonWardProfiles, fill = "model_final_res")
+```
+
+```{r}
+final_model_Moran <- LonWardProfiles %>%
+  st_drop_geometry()%>%
+  dplyr::select(model_final_res)%>%
+  pull()%>%
+  moran.test(., Lward.knn_4_weight)%>%
+  tidy()
+
+final_model_Moran
+```
+现在，我们也许可以停止运行空间误差模型了，但可能不是空间自相关性导致我们的模型出现问题，而是 "全局 "回归模型没有捕捉到全部信息。在我们研究区域的某些地方，因变量和自变量之间的关系可能不会表现出相同的斜率系数。例如，未经授权缺席次数的增加通常与 GCSE 分数呈负相关（学生缺席会导致考试成绩下降），但在该市的某些地区，两者可能呈正相关（在该市的富裕地区，有钱的父母可能只让孩子在一年中的一部分时间里上学，然后在一年中的另一部分时间里住在世界其他地方，从而导致未经授权缺席次数的增加。在校期间的滑雪假期比较便宜，但学生们仍然可以享受生活在富裕家庭的所有其他优势，这将有利于他们的考试成绩。
+If this occurs, then we have `‘non-stationarity’` - this is when the global model does not represent the relationships between variables that might vary locally. 如果出现这种情况，我们就会遇到 "非稳态 "问题--这是指全局模型无法代表可能局部变化的变量之间的关系。
+
+```{r}
+coordsW2 <- st_coordinates(coordsW)
+
+LonWardProfiles2 <- cbind(LonWardProfiles,coordsW2)
+
+GWRbandwidth <- gwr.sel(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+                    log(median_house_price_2014) + 
+                    inner_outer + 
+                    rate_of_job_seekers_allowance_jsa_claimants_2015 +
+                    percent_with_level_4_qualifications_and_above_2011, 
+                  data = LonWardProfiles2, 
+                        coords=cbind(LonWardProfiles2$X, LonWardProfiles2$Y),
+                  adapt=T)
+```
+
+```{r}
+GWRbandwidth
+```
+
+Setting adapt=T here means to automatically find the proportion of observations for the weighting using k nearest neighbours (an adaptive bandwidth), False would mean a global bandwidth and that would be in meters (as our data is projected). 在这里设置 adapt=T 意味着使用 k 个近邻（自适应带宽）自动找到加权观测值的比例，False 意味着全局带宽，而且是以米为单位（因为我们的数据是投影的）。
+
+Occasionally data can come with longitude and latitude as columns (e.g. WGS84) and we can use this straight in the function to save making centroids, calculating the coordinates and then joining - the argument for this is longlat=TRUE and then the columns selected in the coords argument e.g. coords=cbind(long, lat). The distance result will then be in KM. 有时数据中会包含经度和纬度列（如 WGS84），我们可以在函数中直接使用，以节省制作中心点、计算坐标和连接的过程--参数为 longlat=TRUE，然后在参数 coords 中选择列，如 coords=cbind(long,lat)。距离结果将以千米为单位。
+
+The optimal bandwidth is about 0.015 meaning 1.5% of all the total spatial units should be used for the local regression based on k-nearest neighbours. Which is about 9 of the 626 wards. 最佳带宽约为 0.015，这意味着所有空间单位总数的 1.5%应用于基于 k 近邻的局部回归。这大约是 626 个区中的 9 个区。
+
+This approach uses cross validation to search for the optimal bandwidth, it compares different bandwidths to minimise model residuals — this is why we specify the regression model within gwr.sel(). It does this with a Gaussian weighting scheme (which is the default) - meaning that near points have greater influence in the regression and the influence decreases with distance - there are variations of this, but Gaussian is a fine to use in most applications. To change this we would set the argument gweight = gwr.Gauss in the gwr.sel() function — gwr.bisquare() is the other option. We don’t go into cross validation in this module. 这种方法使用交叉验证来寻找最佳带宽，比较不同带宽以最小化模型残差--这就是我们在 gwr.sel() 中指定回归模型的原因。该方法采用高斯加权方案（默认值），这意味着近点在回归中的影响更大，且影响随距离的增加而减小。要改变这一点，我们可以在 gwr.sel() 函数中设置参数 gweight = gwr.Gauss，另一个选项是 gwr.bisquare()。本模块不涉及交叉验证。
+
+
+但是，设置固定带宽的一个问题是，我们假设所有变量在同一空间内具有相同的关系（使用相同的邻域数或距离）......BUT a problem with setting a fixed bandwidth is we assume that all variables have the same relationship across the same space (using the same number of neighbours or distance) （如 2015 年求职者补贴率和 2011 年具有四级及以上资格证书的百分比）。我们可以让这些带宽变化，因为有些关系会在不同的空间尺度上运行......这就是所谓的多尺度 GWR，Lex Comber 最近说，所有 GWR 都应该是 `Multisacle`。我们在这里已经讲了很多，我就不多说了。如果您有兴趣，Lex 有一本关于多尺度 GWR 的教程。
+`MGWR`
+
+```{r}
+#run the gwr model
+gwr.model = gwr(average_gcse_capped_point_scores_2014 ~ unauthorised_absence_in_all_schools_percent_2013 + 
+                    log(median_house_price_2014) + 
+                    inner_outer + 
+                    rate_of_job_seekers_allowance_jsa_claimants_2015 +
+                    percent_with_level_4_qualifications_and_above_2011, 
+                  data = LonWardProfiles2, 
+                coords=cbind(LonWardProfiles2$X, LonWardProfiles2$Y), 
+                adapt=GWRbandwidth,
+                #matrix output
+                hatmatrix=TRUE,
+                #standard error
+                se.fit=TRUE)
+
+#print the results of the model
+gwr.model
+```
+
+The output from the GWR model reveals how the coefficients vary across the 626 Wards in our London Study region. You will see how the global coefficients are exactly the same as the coefficients in the earlier lm model. In this particular model (yours will look a little different if you have used different explanatory variables), if we take unauthorised absence from school, we can see that the coefficients range from a minimum value of -47.06 (1 unit change in unauthorised absence resulting in a drop in average GCSE score of -47.06) to +6.8 (1 unit change in unauthorised absence resulting in an increase in average GCSE score of +6.8). For half of the wards in the dataset, as unauthorised absence rises by 1 point, GCSE scores will decrease between -30.80 and -14.34 points (the inter-quartile range between the 1st Qu and the 3rd Qu). GWR 模型的输出结果显示了伦敦研究区域 626 个区的系数变化情况。您将看到全局系数与之前 lm 模型中的系数完全相同。在这个特定的模型中（如果你使用了不同的解释变量，你的模型看起来会有些不同），如果我们以未经授权的缺课为例，我们可以看到系数范围从最小值-47.06（未经授权的缺课变化1个单位，导致GCSE平均分下降-47.06）到+6.8（未经授权的缺课变化1个单位，导致GCSE平均分上升+6.8）。对于数据集中的半数选区而言，如果未经授权的缺勤率上升 1 个百分点，则 GCSE 分数将下降 -30.80 到 -14.34 分（第 1 Qu 和第 3 Qu 之间的四分位数范围）
+
+You will notice that the R-Squared value (Quasi global R-squared) has improved - this is not uncommon for GWR models, but it doesn’t necessarily mean they are definitely better than global models. The small number of cases under the kernel means that GW models have been criticised for lacking statistical robustness.您会发现 R 平方值（准全局 R 平方）有所提高--这在 GWR 模型中并不少见，但并不一定意味着它们一定比全局模型更好。内核下的案例数量较少，这意味着 GW 模型因缺乏统计稳健性而受到批评。
+
+The best way to compare models is with the `AIC (Akaike Information Criterion)` or for smaller sample sizes the sample-size adjusted AICc, especially when you number of points is less than 40! Which it will be in GWR. The models must also be using the same data and be over the same study area!比较模型的最佳方法是使用 AIC（阿凯克信息准则），或者对于较小的样本量，使用样本量调整后的 AICc，尤其是当点数少于 40 时！在 GWR 中就是这样。这些模型还必须使用相同的数据，并且覆盖相同的研究区域！
+
+AIC 的计算公式为
+
+- 自变量的数量
+-模型的最大似然估计值（模型对数据的再现程度）。
+
+我们还可以看到其他变量的系数范围，它们表明了一些有趣的空间模式。为了探究这一点，我们可以绘制不同变量的 GWR 系数图。首先，我们可以将系数附加到原始数据框中--这很简单，因为每个选区的系数在空间点数据框中的出现顺序与原始数据框中的相同。
+
+```{r}
+results <- as.data.frame(gwr.model$SDF)
+names(results)
+```
+
+```{r}
+#attach coefficients to original SF
+
+
+LonWardProfiles2 <- LonWardProfiles %>%
+  mutate(coefUnauthAbs = results$unauthorised_absence_in_all_schools_percent_2013,
+         coefHousePrice = results$log.median_house_price_2014.,
+         coefJSA = rate_of_job_seekers_allowance_jsa_claimants_2015,
+         coefLev4Qual = percent_with_level_4_qualifications_and_above_2011)
+```
+
+```{r}
+tm_shape(LonWardProfiles2) +
+  tm_polygons(col = "coefUnauthAbs", 
+              palette = "RdBu", 
+              alpha = 0.5)
+```
+
+
+现在，您将如何绘制房价系数、求职者津贴和四级资格系数level 4 qualification coefficient？
+
+第一幅图是未经授权缺席系数图，我们可以看到，在伦敦的大多数行政区，存在我们预期的负相关关系--即随着未经授权缺席的增加，考试成绩会下降。然而，有三个区（威斯敏斯特、肯辛顿和切尔西、哈默斯密斯和富勒姆，以及伦敦东南部贝克斯利希斯附近的一个地区--伦敦最富裕的地区之一）的关系却是正向的--随着未经批准的缺课次数增加，GCSE平均分也随之增加。
+这是一个非常有趣的模式，也是一个反直觉的模式，但部分原因可能是居住在这些地区的许多人拥有多处房产（学生一年中有相当长的时间居住在全国各地，甚至世界各地）、国外假期以及居住在这些地区的人私立学校过多。如果情况并非如此，擅自离校反映的是就读于当地市内学校的贫困学生擅自离校的情况，那么GCSE的高分也可能反映了那些被送往全国其他地方的昂贵收费学校，并在当年晚些时候返回父母家中的学生的成绩。无论如何，这些因素都可以解释这些结果。当然，这些结果在整个伦敦可能并不具有统计意义。粗略地说，`如果系数估计值与零的距离超过 2 个标准误差，那么它就是 "具有统计意义 "的`。这意味着，如果我们在伦敦的每个行政区中都有 100 个学校，那么我们就会看到这种模式的可能性。但是，由于我们只有 32 个学校，因此我们需要更多的数据来证明这一点。
+
+请记住前面提到的标准误差是 "系数与因变量平均值（其标准差）的平均变化量"。因此，如果未经授权的缺课率增加 1%，虽然模型显示我们可能预期 GSCE 分数会下降-41.2 分，但这可能平均相差约 1.9 分。根据经验，我们希望标准误差的值相对于系数的大小要小一些"。
+
+
+```{r}
+#run the significance test
+sigTest = abs(gwr.model$SDF$"log(median_house_price_2014)")-2 * gwr.model$SDF$"log(median_house_price_2014)_se"
+
+
+#store significance results
+LonWardProfiles2 <- LonWardProfiles2 %>%
+  mutate(GWRUnauthSig = sigTest)
+```
+
+如果该值大于零（即估计值与零相差两个标准误差以上），则真实值为零的可能性很小，即在统计上具有显著性（接近 95% 的置信水平）。
+
+这是两个概念的结合：
+
+正态分布中 95% 的数据在均值的两个标准差之内
+回归的统计显著性通常在 95% 的水平上衡量。如果 p 值小于 5%，即 0.05，那么有 95% 的概率像您观察到的这么大的系数不是偶然出现的。
+将这两者结合起来，就意味着如果...
+
+系数相对于其标准误差较大，并且
+p 值告诉您，在 95% 的水平上（小于 5% - 0.05），这个大是否在统计学上可以接受。
+您可以确信，在您的样本中，几乎在所有情况下，这都是一个真实可靠的系数值。
+
+现在，您应该为 GWR 模型中的每个变量计算这些系数，例如，看看能否将它们绘制在地图上：
+
+```{r}
+tm_shape(LonWardProfiles2) +
+  tm_polygons(col = "GWRUnauthSig", 
+              palette = "RdYlBu")
+```
+From the results of your GWR exercise, what are you able to conclude about the geographical variation in your explanatory variables when predicting your dependent variable?
+
+
+
+
+

@@ -1,3 +1,11 @@
+WEEK2 HW
+
+# Task
+
+calculate the average percent of science students (in all) grades per county meeting the required standards
+
+produce a map to show where the Country averages are above or below the State of Washington average
+
 ```{r}
 # packages
 library(tidyverse)
@@ -8,19 +16,22 @@ library(tmap)
 library(tmaptools)
 ```
 
+Data
+1.Washing Counties
+https://hub.arcgis.com/datasets/kingcounty::washington-counties-with-natural-shoreline-washsh-area/explore?location=47.272700%2C-120.740400%2C7.67
+
+2.school report card data
+https://data.wa.gov/education/Report-Card-Assessment-Data-2018-19-School-Year/5y3z-mgxd/about_data
+
 ```{r}
 # read
-report <- read_csv(here::here("homework_2", 
+report <- read_csv(here::here("wk2","data", 
                    "Report_Card_Assessment_Data_2018-19_School_Year.csv"),
                               na= "NULL")
 
-shape <- st_read(here::here("homework_2",                          "Washington_Counties_with_Natural_Shoreline___washsh_area",                           "Washington_Counties_with_Natural_Shoreline___washsh_area.shp"))
+shape <- st_read(here::here("wk2","data",                          "Washington_Counties_with_Natural_Shoreline___washsh_area",                           "Washington_Counties_with_Natural_Shoreline___washsh_area.shp"))
 ```
 
-
-# Task
-
-calculate the average percent of science students (in all) grades per county meeting the required standards
 
 We have:
 
@@ -38,6 +49,9 @@ Datatypelist <- report %>%
                values_to="Variable_class")
 
 Datatypelist
+```
+
+```{r}
 
 county_only <- report %>%
   clean_names() %>%
@@ -67,6 +81,7 @@ We now have the percent that me from the counties and and need to work out what 
 state_average <- county_only%>%
   summarise(state_average= mean(percent_met_per_county))%>%
   pull()
+# pull is a function that pulls out a column from a dataframe
 
 ```
 
@@ -81,6 +96,25 @@ county_only_above_below_state <- county_only %>%
                                    difference_to_state==0 ~ "equal"
                                    ))
 
+```
+
+This approach uses strings to remove the % and make the column numeric
+
+```{r,echo=FALSE}
+county_only <- report %>%
+  clean_names()%>%
+  select(county, organization_level, test_subject, percent_met_standard)%>%
+  filter(county != "Multiple")%>%
+  filter(organization_level == "School")%>%
+  filter(test_subject == "Science") %>%
+  filter(percent_met_standard != "Suppressed: N<10")%>%
+  filter(percent_met_standard != "No Students")%>%
+  # negate if true return no matching....
+  filter(str_detect(percent_met_standard, "^<", negate = T))%>%
+  mutate(percent_met_standard = str_replace_all(percent_met_standard, pattern = c('%' = "")))%>%
+  mutate(percent_met_standard2= as.numeric(percent_met_standard))%>%
+  group_by(county)%>%
+  summarise(average_met=mean(percent_met_standard2, na.rm=T))
 ```
 
 Join to our spatial data....
@@ -98,13 +132,12 @@ joined_data <- shape %>%
 Let's map...
 
 ```{r}
+bbox_county <- joined_data %>%
+  st_bbox(.) %>% 
+  tmaptools::read_osm(., type = "osm", zoom = NULL)
 
-#bbox_county <- joined_data %>%
-#  st_bbox(.) %>% 
-#  tmaptools::read_osm(., type = "osm", zoom = NULL)
-
-#tm_shape(bbox_county)+
-#  tm_rgb()+
+tm_shape(bbox_county)+
+  tm_rgb()+
 
   tm_shape(joined_data) + 
   tm_polygons("above_below", 

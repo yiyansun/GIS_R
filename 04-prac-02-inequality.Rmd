@@ -1,7 +1,7 @@
 # Gender Inequality Index TASK - Week 4
 
-  Read in global gender inequality data
-  Join the global gender inequality index to spatial data of the World, creating a new column of difference in inequality between 2010 and 2019
+1. Read in global gender inequality data
+2. Join the global gender inequality index to spatial data of the World, creating a new column of difference in inequality between 2010 and 2019
   Share it with the World on GitHub
   
   Tip the countrycode R package will be helpful
@@ -17,6 +17,13 @@ library(tidyverse)
 library(terra)
 library(ggplot2)
 library(remotes)
+library(countrycode)
+library(readr)
+library(countrycode)
+library(ggspatial)
+library(RColorBrewer)
+library(viridis)
+library(showtext) # to change font
 ```
 
 ## countrycode package
@@ -30,13 +37,15 @@ library(remotes)
 
 * HDI data from: https://hdr.undp.org/data-center/documentation-and-downloads
 * Shapefile from: https://hub.arcgis.com/datasets/2b93b06dc0dc4e809d3c8db5cb96ba69_0/explore?location=-2.688200%2C0.000000%2C1.41 
+
 ```{r}
-HDR <- read_csv("wk4/data/HDR21-22_Statistical_Annex_GII_Table.csv",
+HDI <- read_csv("wk4/data/HDR21-22_Composite_indices_complete_time_series.csv",
                 locale = locale(encoding = "latin1"),
                 na = " ", skip=0)
 
 World <- st_read("wk4/data/World_Countries_Generalized/World_Countries_Generalized.shp")
 ```
+
 
 ## Column names
 
@@ -46,8 +55,9 @@ We could also just join it without this on the country name column
 
 Some notes:
 
-* COW codes = correlates of war codes
-* ISO = International Organization for Standardization with 2 or 3 letters...
+* `COW codes` = correlates of war codes
+* `ISO` = International Organization for Standardizati
+on with 2 or 3 letters...
 
 ```{r}
 HDIcols<- HDI %>%
@@ -61,3 +71,196 @@ HDIcols<- HDI %>%
   
 ```
 
+## Join
+
+Join the csv to world shape file
+
+```{r}
+Join_HDI <- World %>% 
+  clean_names() %>%
+  left_join(., 
+            HDIcols,
+            by = c("iso" = "iso_code"))
+
+# 261 if using "aff_iso", 251 if using "iso". Could filter out the NA values.
+```
+
+```{r}
+Join_HDI_2 <- World %>% 
+  clean_names() %>%
+  left_join(., 
+            HDIcols,
+            by = c("country" = "country"))
+#251
+
+```
+
+# Problems 
+
+* With Join_HDI there are 11 rows for Antarctica if using aff_iso - be sure to use iso column or remove the NA values as in the aff_iso Antarctica is NA
+
+* With Join_HDI_2 the entries for other islands aren't joined as they don't have the same name...e.g. France, French Guiana, French Southern Territories.....
+
+```{r}
+Join_HDI_FR<-Join_HDI %>%
+  filter(aff_iso=="FR")
+
+Join_HDI_2_FR<-Join_HDI_2 %>%
+  filter(aff_iso=="FR")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Load Data
+
+
+```{r}
+# source: https://hub.arcgis.com/datasets/2b93b06dc0dc4e809d3c8db5cb96ba69_0/explore?location=-0.002619%2C0.000000%2C1.00
+world_map<- st_read("wk4/data/World_Countries_Generalized/World_Countries_Generalized.shp")
+
+# source: https://hdr.undp.org/sites/default/files/2021-22_HDR/HDR21-22_Composite_indices_complete_time_series.csv
+gii_table <- read_csv("wk4/data/HDR21-22_Composite_indices_complete_time_series.csv") %>%
+  dplyr::select(., iso3, country, contains("gii"))
+
+```
+
+# Analyze data
+
+```{r}
+
+# Create ISO-2 character for merging with map data, and
+# calculate the difference between 2019 and 2010
+gii_table2 <- gii_table %>%
+  dplyr::mutate(
+    .,
+    iso2c = countrycode(iso3, origin = "iso3c", destination = "iso2c"),
+    .before = country
+  ) %>%
+  dplyr::mutate(
+    .,
+    gii_diff = gii_2019 - gii_2010,
+    .after = country
+  )
+
+# Join map data with statistics
+gii_map <- world_map %>%
+  left_join(
+    .,
+    gii_table2,
+    by = c("ISO" = "iso2c")
+  )
+
+
+```
+
+# create map
+
+```{r}
+# add fonts
+font_add_google("Fira Sans")
+showtext_auto()
+
+# ggplot 
+plot <- 
+  ggplot(data = gii_map) +
+  geom_sf(
+    aes(fill = gii_diff, alpha = "No Data"), # add alpha to show 2nd legend for NA
+    color = "white",
+    lwd = 0.3
+  ) + 
+
+  # set title and caption
+  labs(
+    title = "Change in Gender Inequality between 2010 and 2019",
+    caption = "Source: UNDP Human Development Reports (https://hdr.undp.org/data-center/documentation-and-downloads)"
+  ) +
+
+  # change scale aesthetics
+  scale_fill_viridis(
+    option = "magma",
+    begin = 0,
+    end = 1,
+    name = "Difference in GII",
+    na.value = "white",
+    guide = guide_colorbar(
+      direction = "horizontal",
+      reverse = TRUE,
+      barwidth = 20,
+      barheight = 0.5,
+      title.position = "top",
+      title.hjust = 0.6,
+      label.position = "bottom",
+    )
+  ) + 
+  
+  # scale for no data
+  scale_alpha_manual(
+    name = " ",
+    values = 1,
+    guide = guide_legend(
+      keywidth = 3,
+      keyheight = 0.5,
+      title.position = "top",
+      label.position = "bottom",
+      override.aes = list(fill = "white")
+    )
+  ) +
+  
+  # aesthetics
+  theme(
+    plot.background = element_rect(fill = "lightcyan4", linewidth = 0),
+    panel.background = element_rect(fill = "lightcyan4"),
+    text = element_text(
+      color = "white",
+      family = "Fira Sans"
+    ),
+    plot.title = element_text(
+      size = 20,
+      margin = margin(t = 10, b = 10),
+      hjust = 0.5
+    ),
+    legend.title = element_text(size = 15),
+    legend.position = "bottom",
+    legend.background = element_blank()
+  ) 
+
+plot
+```
+
+# Save Plot as image
+
+Before saving the plot, the size of text has been modified.
+
+```{r}
+# change the theme to save
+save <- plot + 
+  theme(
+    text = element_text(
+      size = 30,
+    ),
+    plot.title = element_text(
+      size = 50,
+    ),
+    legend.title = element_text(size = 30),
+  ) 
+  
+# save ggplot to image
+ggsave(
+  "wk4/GII.png",
+  plot = save,
+  height = 7,
+  width = 7)
+
+
+```

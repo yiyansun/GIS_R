@@ -3,23 +3,52 @@ title: "07-prac-01-demo"
 author: "yiyan Sun"
 date: "2023-11-22"
 output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
-# TASK WEEK 7
-Are the values (in this case the density of blue plaques) similar (or dissimilar) across the wards of London
+
+# WEEK 7 Spatial autocorrelation
+
+1.Execute data cleaning and manipulation appropriate for analysis
+2.Explain and implement different models for spatial relationships (e.g.
+spatial weights) 3.Investigate the degree to which values at spatial
+points are similar (or different) to each other 4.Interpret the meaning
+of spatial autocorrleation in spatial data
+
+# Spatial autocorrelation
+
+explore patterns of spatially referenced continuous observations using
+various measures of spatial autocorrelation.
+
+# Question:
+
+Are the values (in this case the density of blue plaques) similar (or
+dissimilar) across the wards of London
 
 ```{r}
-library(janitor)
+library(spatstat)
+library(spdep)
+library(here)
+library(sp)
+library(tmap)
 library(sf)
 library(tidyverse)
+library(stringr)
+library(geojson)
+library(geojsonio)
+library(tmaptools)
+library(rgeos)
+library(maptools)
 ```
 
 # read data
-1. London Ward Data: 
-  from the London Data store          https://data.london.gov.uk/dataset/statistical-gis-boundary-files-london
-  
-2. London Wards Merged data: 
-  from the London Data store          
-  
+
+1.  London Ward Data: from the London Data store
+    <https://data.london.gov.uk/dataset/statistical-gis-boundary-files-london>
+
+2.  London Wards Merged data: from the London Data store
+
 ```{r}
 LondonWards <- st_read("wk7/data/statistical-gis-boundaries-london/ESRI/London_Ward.shp")%>% 
   st_transform(.,27700)
@@ -28,7 +57,7 @@ LondonWardsMerged <- st_read("wk7/data/statistical-gis-boundaries-london/ESRI/Lo
   st_transform(.,27700)
 ```
 
-3. Ward data
+3.  Ward data
 
 ```{r}
 WardData <- read_csv("wk7/data/ward-profiles-excel-version.csv",locale=locale(encoding="latin1"),na=c("NA","n/a")) %>% 
@@ -49,6 +78,462 @@ LondonWardsMerged <- LondonWardsMerged %>%
 ```
 
 ```{r}
+#have a look to check that it's 
+#in the right projection
+st_crs(LondonWardsMerged)
+```
 
+```{r}
+BluePlaques <- st_read("https://s3.eu-west-2.amazonaws.com/openplaques/open-plaques-london-2018-04-08.geojson") %>% 
+  st_transform(., crs = 27700)
+```
+
+```{r}
+tmap_mode("plot")
+tm_shape(LondonWardsMerged) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(BluePlaques) +
+  tm_dots(col = "blue")
+```
+
+# data cleaning
+
+```{r}
+BluePlaquesSub <- BluePlaques[LondonWardsMerged,]
+
+tm_shape(LondonWardsMerged) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(BluePlaquesSub) +
+  tm_dots(col = "blue")
+```
+
+# data manipulation
+
+The measures of spatial autocorrelation that we will be using require
+continuous observations (counts of blue plaques, average GCSE scores,
+average incomes etc.) to be spatially referenced (i.e. attached to a
+spatial unit like a ward or a borough)
+
+To create a continuous observation from the blue plaques data we need to
+count all of the blue plaques that fall within each Ward in the City
+`st_intersects()` function to count the number of blue plaques that fall
+within each ward
+
+```{r}
+example<-st_intersects(LondonWardsMerged, BluePlaquesSub)
+
+example
+
+```
+
+Here the polygon with the ID of 6 Kingston upon Thames - Coombe Hill has
+three plaques within it...we can check this with st_join (or using QGIS
+by opening the data)
+
+```{r}
+check_example <- LondonWardsMerged%>%
+  st_join(BluePlaquesSub)%>%
+  filter(ward_name=="Kingston upon Thames - Coombe Hill")
+```
+
+take the length of each list per polygon and add this as new column
+
+```{r}
+points_sf_joined <- LondonWardsMerged%>%
+  mutate(n = lengths(st_intersects(., BluePlaquesSub)))%>%
+  janitor::clean_names()%>%
+  #calculate area
+  mutate(area=st_area(.))%>%
+  #then density of the points per ward
+  mutate(density=n/area)%>%
+  #select density and some other variables 
+  dplyr::select(density, ward_name, gss_code, n, average_gcse_capped_point_scores_2014)
+```
+
+choropleth map
+
+```{r}
+points_sf_joined<- points_sf_joined %>%                    
+  group_by(gss_code) %>%         
+  summarise(density = first(density),
+          wardname= first(ward_name),
+          plaquecount= first(n))
+
+tm_shape(points_sf_joined) +
+    tm_polygons("density",
+        style="jenks",
+        palette="PuOr",
+        midpoint=NA,
+        popup.vars=c("wardname", "density"),
+        title="Blue Plaque Density")
+```
+
+looks as though we might have some clustering of blue plaques in the
+centre of London so let's check this with `Moran’s I` and some other
+statistics
+
+# weight matrix
+
+Before being able to calculate Moran's I and any similar statistics, we
+need to first define a `spatial weights matrix`
+
+```{r}
+#First calculate the centroids of all Wards in London
+
+coordsW <- points_sf_joined%>%
+  st_centroid()%>%
+  st_geometry()
+  
+plot(coordsW,axes=TRUE)
+
+
+```
+
+generate a spatial weights matrix
+
+We'll start with a simple binary matrix简单的二进制矩阵 of queen's case
+neighbours (otherwise known as Contiguity edges
+corners)该矩阵包含皇后的相邻情况（也称为 "相邻边角"）
+
+This method means that polygons with a shared edge or a corner will be
+included in computations for the target polygon...A spatial weight
+matrix represents the spatial element of our data, this means we are
+trying to conceptualize and model how parts of the data are linked (or
+not linked) to each other spatially, using rules that we will set.
+空间权重矩阵代表了我们数据的空间元素，这意味着我们正试图使用我们将设定的规则来概念化和模型化数据的各个部分在空间上是如何相互关联（或不关联）的......。
+
+If the features share a boundary they are *contiguous*, this can also be
+classed as only common boundaries
+如果特征共享一个边界，那么它们就是毗连的，这也可以分为只有共同边界的特征（即"边界"权重）和共同边界和顶点的特征（即"皇后"权重）。在这种情况下，我们将使用皇后权重，因为它们更符合我们的数据。我们将使用`poly2nb()`函数来生成我们的空间权重矩阵，该函数将我们的数据作为输入，并返回一个空间权重矩阵，该矩阵将我们的数据中的每个要素与其相邻的要素相关联。我们将使用`listw2mat()`函数将我们的空间权重矩阵转换为一个矩阵
+
+Alternatively instead of using contiguous relationships you can use
+distance based relationships. This is frequently done with k nearest
+neighbours in which k is set to the closest observations. e.g. K=3 means
+the three closest observations.
+
+In the first instance we must create a neighbours list --- which is a
+list of all the neighbours. To do so we will use `poly2nb()` with the
+argument `queen=T` saying we want a to use Queens case. Let's see a
+summary of the output
+
+```{r}
+#create a neighbours list
+LWard_nb <- points_sf_joined %>%
+  poly2nb(., queen=T)
+
+summary(LWard_nb)
+```
+
+the average number of neighbours is 5.88
+
+```{r}
+#plot them
+plot(LWard_nb, st_geometry(coordsW), col="red")
+#add a map underneath
+plot(points_sf_joined$geometry, add=T)
+```
+
+## Matrix style
+
+This makes a matrix the size of the number of neighbourhoods with values
+indicating if the elements in the rows are a neighbour or not.
+根据权重列表制作一个空间权重矩阵。空间权重矩阵的大小相当于邻域的数量，其数值表示各行中的元素是否为邻域。权重的样式在这里尤为重要：
+
+B 是基本的二进制编码（1/0） W 是行标准化（对 n 的所有链接求和） C
+是全局标准化（n 的所有链接之和） U 等于 C 除以相邻链路数（所有链路之和为
+1） S 是 Tiefelsdorf 等人 1999
+年提出的方差稳定编码方案（所有链接的总和为 n）。
+
+B is the basic binary coding (1/0) W is row standardised (sums over all
+links to n) C is globally standardised (sums over all links to n) U is
+equal to C divided by the number of neighbours (sums over all links to
+unity) S is the variance-stabilizing coding scheme proposed by
+Tiefelsdorf et al. 1999, p. 167-168 (sums over all links to n).
+
+```{r}
+#create a spatial weights matrix from these weights
+Lward.lw <- LWard_nb %>%
+  nb2mat(., style="B")
+
+sum(Lward.lw)
+```
+
+Summing the binary (1/0) shows that we have 3680 neighbours. Now if we
+were to do global standardisation this would mean dividing our 625 wards
+by the total number of neighbours meaning each spatial weight has a
+value of 0.169.将二进制（1/0）相加，显示我们有 3680
+个邻居。现在，如果我们要进行全局标准化，这就意味着将我们的 625
+个区除以邻居总数，这意味着每个空间权重的值为 0.169。
+
+Alternatively we can do row standardisation where 1 is divided by the
+sum of the number of neighbours in each row. For example, row 1 here
+sums to 6, meaning each weight would be 0.166 in row 1
+only，我们也可以采用行标准化，即用 1 除以每行的邻居数总和。例如，第 1
+行的总和为 6，这意味着仅第 1 行的每个权重为 0.166。
+
+```{r}
+sum(Lward.lw[1,])
+```
+
+Standardisation permits comparable spatial parameters.
+
+# autocorrelation
+
+Moran's I requires a spatial weight list type object as opposed to
+matrix
+
+```{r}
+Lward.lw <- LWard_nb %>%
+  nb2listw(., style="C")
+```
+
+## Moran's I
+
+Moran's I test tells us whether we have clustered values (close to 1) or
+dispersed values (close to -1), we will calculate for the `densities`
+rather than raw values
+
+```{r}
+I_LWard_Global_Density <- points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  moran.test(., Lward.lw)
+
+I_LWard_Global_Density
+```
+
+## geary's C
+
+whether similar values or dissimilar values are clustering
+
+```{r}
+C_LWard_Global_Density <- 
+  points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  geary.test(., Lward.lw)
+
+C_LWard_Global_Density
+```
+
+## Getis Ord
+
+whether high or low values are clustering.
+
+If G \> Expected = High values clustering; if G \< expected = low values
+clustering dispersion.
+
+```{r}
+G_LWard_Global_Density <- 
+  points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  globalG.test(., Lward.lw)
+
+G_LWard_Global_Density
+```
+
+the global statistics are indicating that we have spatial
+autocorrelation of Blue Plaques in London
+
+## summary
+
+The Moran's I statistic = 0.67 ( 1 = clustered, 0 = no pattern, -1 =
+dispersed) which shows that we have some distinctive clustering
+
+The Geary's C statistic = 0.41 (remember Geary's C falls between 0 and
+2; 1 means no spatial autocorrelation, \<1 - positive spatial
+autocorrelation or similar values clustering, \>1 - negative spatial
+autocorreation or dissimilar values clustering) which shows that similar
+values are clustering
+
+The General G statistic = G \> expected, so high values are tending to
+cluster.
+
+## Local Moran's I
+
+-   The difference between a value and neighbours \* the sum of differences between neighbours and the mean
+
+-   Where the the difference between a value and neighbours is divided by the standard deviation (how much values in neighbourhood vary about the mean)
+
+它会返回几列数据，其中最令人感兴趣的是 Z 分数。Z 分数是指一个数值与平均值相差（高于或低于）多少个标准差。这使我们能够说明，考虑到邻近地区，我们的值是否与该地点的预期值有显著差异。
+A Z-score is how many standard deviations a value is away (above or below) from the mean. This allows us to state if our value is significantly different than expected value at this location considering the neighours.
+
+We are comparing our value of Moran’s I to that of an expected value (computed from a separate equation that uses the spatial weight matrix, and therefore considers the neighbouring values). We are expecting our value of Moran’s I to be in the middle of the distribution of the expected values. These expected values follow a normal distribution, with the middle part representing complete spatial randomness. This is typically between < -1.65 or > +1.65 standard deviations from the mean
+我们正在将莫兰I值与预期值进行比较（预期值是通过使用空间权重矩阵的单独方程计算得出 的，因此考虑了相邻值）。我们希望莫兰 I 值处于预期值分布的中间位置。这些预期值呈正态分布，中间部分代表完全的空间随机性。这通常介于与平均值的标准差 < -1.65 或 > +1.65 之间。
+
+零假设null hypothesis总是存在完全的空间随机性。零假设意味着一组给定的观察结果不存在统计意义no statistical significance exists in a set of given observations
+
+如果我们的值偏向分布的尾部，那么该值就不可能是完全空间随机的，我们就可以拒绝零假设......因为它不是我们在这个位置所期望的。
+
+在本例中，我们使用的 z 值大于 2.58 或小于2.58，我们将其解释为>2.58或<-2.58的标准差在 99% 的水平上是显著的......这意味着自相关性不存在的可能性<1%。
+
+- What we are comparing values to in Local Moran’s I
+- What the results mean
+- Why the results could be important
+
+```{r}
+#use the localmoran function to generate I for each ward in the city
+
+I_LWard_Local_count <- points_sf_joined %>%
+  pull(plaquecount) %>%
+  as.vector()%>%
+  localmoran(., Lward.lw)%>%
+  as_tibble()
+
+I_LWard_Local_Density <- points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  localmoran(., Lward.lw)%>%
+  as_tibble()
+
+#what does the output (the localMoran object) look like?
+slice_head(I_LWard_Local_Density, n=5)
+
+
+```
+There are 5 columns of data. We want to copy some of the columns (the I score (column 1) and the z-score standard deviation (column 4)) back into the LondonWards spatialPolygonsDataframe
+
+```{r}
+points_sf_joined <- points_sf_joined %>%
+  mutate(plaque_count_I = as.numeric(I_LWard_Local_count$Ii))%>%
+  mutate(plaque_count_Iz =as.numeric(I_LWard_Local_count$Z.Ii))%>%
+  mutate(density_I =as.numeric(I_LWard_Local_Density$Ii))%>%
+  mutate(density_Iz =as.numeric(I_LWard_Local_Density$Z.Ii))
+```
+
+plot a map of the local Moran’s I outputs
+
+We’ll set the breaks manually based on the rule that data points >2.58 or <-2.58 standard deviations away from the mean are significant at the 99% level (<1% chance that autocorrelation not present); >1.96 - <2.58 or <-1.96 to >-2.58 standard deviations are significant at the 95% level (<5% change that autocorrelation not present). >1.65 = 90% etc.
+
+```{r}
+breaks1<-c(-1000,-2.58,-1.96,-1.65,1.65,1.96,2.58,1000)
+```
+
+create a new diverging colour brewer palette and reverse the order using rev() (reverse) so higher values correspond to red and lower values to blue
+```{r}
+library(RColorBrewer)
+MoranColours<- rev(brewer.pal(8, "RdGy"))
+```
+
+```{r}
+tm_shape(points_sf_joined) +
+    tm_polygons("plaque_count_Iz",
+        style="fixed",
+        breaks=breaks1,
+        palette=MoranColours,
+        midpoint=NA,
+        title="Local Moran's I, Blue Plaques in London")
+```
+
+This map shows some areas in the centre of London that have relatively high scores, indicating areas with lots of blue plaques neighbouring other areas with lots of blue plaques. 
+
+##  Local Getis Ord  G∗i
+
+hot and cold spots
+
+z-score shows how many standard deviations a value (our value) is away (above or below) from the mean (of the expected values)
+
+in the case of Getis Ord  G∗i this is the local sum (of the neighbourhood) compared to the sum of all features
+
+In Moran’s I this is just the value of the spatial unit (e.g. polygon of the ward) compared to the neighbouring units.
+
+Here, to be significant (or a hot spot) we will have a high value surrounded by high values. The local sum of these values will be different to the expected sum (think of this as all the values in the area) then where this difference is large we can consider it to be not by chance…
+
+分析是一个 Z 值数组，每个像素[或多边形]一个，Z 值是该像素[或多边形]及其邻近像素与全局平均值的标准偏差数。高 Z 值表示高像素值的集群更密集，也就是热点。低 Z 值表示低像素值更密集地聚集在一起，也就是冷点。单个像素的高值或低值本身可能很有趣，但不一定很重要。
+
+```{r}
+Gi_LWard_Local_Density <- points_sf_joined %>%
+  pull(density) %>%
+  as.vector()%>%
+  localG(., Lward.lw)
+
+head(Gi_LWard_Local_Density)
+```
+
+Note that because of the differences in Moran’s I and Getis Ord G∗i there will be differences between polyogons that are classed as significant.
+
+Add the Getis Ord G∗i data to the simple feature
+```{r}
+points_sf_joined <- points_sf_joined %>%
+  mutate(density_G = as.numeric(Gi_LWard_Local_Density))
+```
+
+```{r}
+GIColours<- rev(brewer.pal(8, "RdBu"))
+
+#now plot on an interactive map
+tm_shape(points_sf_joined) +
+    tm_polygons("density_G",
+        style="fixed",
+        breaks=breaks1,
+        palette=GIColours,
+        midpoint=NA,
+        title="Gi*, Blue Plaques in London")
+```
+
+The local Moran’s I and G∗i statistics for wards clearly show that the density of blue plaques in the centre of the city exhibits strong (and positive) spatial autocorrelation, but neither of these maps are very interesting. 
+Why not try some alternative variables and see what patterns emerge… here I’m going to have a look at Average GSCE scores…
+
+```{r}
+#use head to see what other variables are in the data file
+
+slice_head(points_sf_joined, n=2)
+```
+
+```{r}
+# print out the class of each column
+Datatypelist <- LondonWardsMerged %>% 
+  st_drop_geometry()%>%
+  summarise_all(class) %>%
+  pivot_longer(everything(), 
+               names_to="All_variables", 
+               values_to="Variable_class")
+
+Datatypelist
+```
+
+```{r}
+I_LWard_Local_GCSE <- LondonWardsMerged %>%
+  arrange(GSS_CODE)%>%
+  pull(average_gcse_capped_point_scores_2014) %>%
+  as.vector()%>%
+  localmoran(., Lward.lw)%>%
+  as_tibble()
+
+points_sf_joined <- points_sf_joined %>%
+  arrange(gss_code)%>%
+  mutate(GCSE_LocIz = as.numeric(I_LWard_Local_GCSE$Z.Ii))
+
+
+tm_shape(points_sf_joined) +
+    tm_polygons("GCSE_LocIz",
+        style="fixed",
+        breaks=breaks1,
+        palette=MoranColours,
+        midpoint=NA,
+        title="Local Moran's I, GCSE Scores")
+```
+
+Now the Gi* statistic to look at clusters of high and low scores and explain what the output map is showing and what other questions this can lead us to ask next week
+
+```{r}
+G_LWard_Local_GCSE <- LondonWardsMerged %>%
+  dplyr::arrange(GSS_CODE)%>%
+  dplyr::pull(average_gcse_capped_point_scores_2014) %>%
+  as.vector()%>%
+  localG(., Lward.lw)
+
+points_sf_joined <- points_sf_joined %>%
+  dplyr::arrange(gss_code)%>%
+  dplyr::mutate(GCSE_LocGiz = as.numeric(G_LWard_Local_GCSE))
+
+tm_shape(points_sf_joined) +
+    tm_polygons("GCSE_LocGiz",
+        style="fixed",
+        breaks=breaks1,
+        palette=GIColours,
+        midpoint=NA,
+        title="Gi*, GCSE Scores")
 ```
 

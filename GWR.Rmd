@@ -1,0 +1,13 @@
+
+
+The traditional ordinary least squares (OLS) regression method is designed for global or average parameter estimation, while the geographically weighted regression (GWR) method is more effective when analyzing the nonstationary spatial parameters.
+
+In the actual research process, the relationship between X and Y in different geographical locations often behaves differently. Therefore, the consideration of spatial nonstationarity is very important (Qin, 2007). In order to solve the problem caused by geographic location, Fotheringham et al., 1997, Fotheringham et al., 2004 proposed a geographically weighted regression (GWR) model based on the theory of local smoothness. It embeds the spatial position of the data into the regression coefficients, which can reflect the heterogeneity of the region and the nonstationarity of the parameters in different spaces.
+
+
+Qin, W. (2007). Research on the Basic Theory and Application of Geographical Weighted Regression. Tongji University: Shanghai, China, 5-30.
+
+Fotheringham, A. S., Charlton, M., & Brunsdon, C. (1997). Measuring spatial variations in relationships with geographically weighted regression. In Recent developments in spatial analysis: Spatial statistics, behavioural modelling, and computational intelligence (pp. 60-82). Berlin, Heidelberg: Springer Berlin Heidelberg.
+
+Fotheringham, A. S., Brunsdon, C., & Charlton, M. (2003). Geographically weighted regression: the analysis of spatially varying relationships. John Wiley & Sons.
+
